@@ -30,6 +30,7 @@ ClawCommand is a comprehensive, TRON-inspired mission control dashboard for mana
 - **Channel Hub** - Multi-channel integration management
 - **Tool Config** - External tool configuration
 - **System Monitor** - Logs and performance monitoring
+- **Environment Detection** - Session-aware runtime snapshot with secret redaction
 
 ## Tech Stack
 
@@ -72,6 +73,14 @@ VITE_ELEVENLABS_API_KEY=your_api_key_here
 # Optional: Analytics
 VITE_ANALYTICS_ID=your_analytics_id
 ```
+
+## Environment + Session Detection
+
+- Config file: `src/config/environment-profile.ts`
+- Detector: `src/lib/environment-session.ts`
+- UI: Settings → Environment tab
+- Validation: `npm run validate:environment`
+- Detailed docs: `../docs/environment-session-detection.md`
 
 ## Deployment
 

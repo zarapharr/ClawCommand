@@ -220,4 +220,5 @@ export type ViewType =
   | 'agent-chat'
   | 'agent-swarm'
   | 'voice'
-  | 'qmd';
+  | 'qmd'
+  | 'mission-control-demo';

@@ -31,6 +31,6 @@ export const defaultEnvironmentProfile: EnvironmentProfile = {
     { pattern: 'gh[pousr]_[A-Za-z0-9]{10,}', replacement: 'gh_[REDACTED]' },
     { pattern: 'xox[baprs]-[A-Za-z0-9-]{10,}', replacement: 'xox-[REDACTED]' },
     { pattern: '[0-9]{8,}:[A-Za-z0-9_-]{16,}', replacement: 'telegram-[REDACTED]' },
-    { pattern: 'Bearer\s+[A-Za-z0-9._-]+', replacement: 'Bearer [REDACTED]' },
+    { pattern: 'Bearer [A-Za-z0-9._-]+', replacement: 'Bearer [REDACTED]' },
   ],
 };

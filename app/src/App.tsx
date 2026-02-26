@@ -17,6 +17,7 @@ import { AgentChatPage } from '@/pages/AgentChatPage';
 import { AgentSwarmPage } from '@/pages/AgentSwarmPage';
 import { VoicePage } from '@/pages/VoicePage';
 import { QMDPage } from '@/pages/QMDPage';
+import { MissionControlDemoPage } from '@/pages/MissionControlDemoPage';
 import WorkflowPage from '@/pages/WorkflowPage';
 import RoutingPage from '@/pages/RoutingPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
@@ -128,6 +129,8 @@ function App() {
         return <VoicePage />;
       case 'qmd':
         return <QMDPage />;
+      case 'mission-control-demo':
+        return <MissionControlDemoPage />;
       default:
         return <FactoryFloorPage />;
     }

@@ -3,7 +3,7 @@ import type { ViewType } from '@/types';
 import { 
   Factory, Users, Wrench, ClipboardList, MessageSquare, 
   FolderOpen, Clock, Brain, Radio, Settings, Activity, Terminal,
-  DollarSign, GitBranch, Route, BarChart3, Network, Volume2, Database
+  DollarSign, GitBranch, Route, BarChart3, Network, Volume2, Database, Radar
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { id: 'agent-swarm', label: 'Agent Swarm', icon: Network },
   { id: 'voice', label: 'Voice Hub', icon: Volume2 },
   { id: 'qmd', label: 'QMD Analytics', icon: Database },
+  { id: 'mission-control-demo', label: 'Mission Control Demo', icon: Radar },
   { id: 'skills', label: 'Skills Forge', icon: Wrench },
   { id: 'tasks', label: 'Task Command', icon: ClipboardList },
   { id: 'sessions', label: 'Session Center', icon: MessageSquare },

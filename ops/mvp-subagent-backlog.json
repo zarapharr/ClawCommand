@@ -1,0 +1,109 @@
+{
+  "timebox": "2-weeks",
+  "packets": [
+    {
+      "id": "MVP-001",
+      "title": "Lock desktop MVP scope and runtime contracts",
+      "owner_role": "architect",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Published contract doc for agents/sessions/cron feeds",
+        "2-week packet order approved",
+        "Known risks with mitigations listed"
+      ],
+      "estimate_hours": 6,
+      "priority": "P0"
+    },
+    {
+      "id": "MVP-002",
+      "title": "Implement runtime adapter normalization for agents/sessions/cron",
+      "owner_role": "runtime-integrator",
+      "dependencies": ["MVP-001"],
+      "acceptance_criteria": [
+        "Adapters return stable typed shapes for all 3 feeds",
+        "Invalid payloads handled with safe fallback and diagnostics",
+        "Secret-like values are redacted in previews"
+      ],
+      "estimate_hours": 10,
+      "priority": "P0"
+    },
+    {
+      "id": "MVP-003",
+      "title": "Wire Sessions page to live runtime feed",
+      "owner_role": "frontend-integrator",
+      "dependencies": ["MVP-002"],
+      "acceptance_criteria": [
+        "Sessions list renders from runtime feed in normal mode",
+        "Empty/error/loading states are visible and actionable",
+        "No regressions in session selection and send actions"
+      ],
+      "estimate_hours": 8,
+      "priority": "P0"
+    },
+    {
+      "id": "MVP-004",
+      "title": "Wire Agents and Cron dashboards to live runtime feeds",
+      "owner_role": "frontend-integrator",
+      "dependencies": ["MVP-002"],
+      "acceptance_criteria": [
+        "Agents and Cron views use runtime feeds end-to-end",
+        "Fallback source badge correctly reports data source",
+        "UI remains responsive under stale/partial data"
+      ],
+      "estimate_hours": 12,
+      "priority": "P0"
+    },
+    {
+      "id": "MVP-005",
+      "title": "Add reliability smoke checks for core data paths",
+      "owner_role": "qa/reliability",
+      "dependencies": ["MVP-003", "MVP-004"],
+      "acceptance_criteria": [
+        "Smoke checklist covers Agents, Sessions, Cron flows",
+        "At least one automated sanity script runs clean",
+        "Defects triaged with severity and owner"
+      ],
+      "estimate_hours": 10,
+      "priority": "P0"
+    },
+    {
+      "id": "MVP-006",
+      "title": "Harden runtime error telemetry and operator diagnostics",
+      "owner_role": "runtime-integrator",
+      "dependencies": ["MVP-002"],
+      "acceptance_criteria": [
+        "Runtime adapter logs structured error reasons",
+        "User-facing error copy maps to operator action",
+        "No uncaught runtime exceptions in smoke pass"
+      ],
+      "estimate_hours": 8,
+      "priority": "P1"
+    },
+    {
+      "id": "MVP-007",
+      "title": "MVP docs, release checklist, and handoff notes",
+      "owner_role": "docs/release",
+      "dependencies": ["MVP-005", "MVP-006"],
+      "acceptance_criteria": [
+        "Operator runbook updated for live-data desktop MVP",
+        "Release notes include known issues and rollback steps",
+        "Handoff checklist validated by non-author"
+      ],
+      "estimate_hours": 6,
+      "priority": "P1"
+    },
+    {
+      "id": "MVP-008",
+      "title": "Final MVP gate and go/no-go review",
+      "owner_role": "architect",
+      "dependencies": ["MVP-007"],
+      "acceptance_criteria": [
+        "All P0 packets marked done with evidence",
+        "Open defects reviewed with explicit disposition",
+        "Go/no-go decision logged"
+      ],
+      "estimate_hours": 4,
+      "priority": "P0"
+    }
+  ]
+}

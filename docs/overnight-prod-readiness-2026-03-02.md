@@ -7,14 +7,27 @@
 - Added explicit runtime status bar with loading/error/fresh-stale/degraded indicators.
 - Added health and connection status panel for Agents, Sessions, and Cron pages.
 - Added action receipt ledger panel with command IDs and success/failed status.
-- Added minimal decision log storage and UI panel.
-- Expanded action receipts to include status/result/error and command ID.
+- Added server-canonical reconciliation for action receipts + decision log through `VITE_RUNTIME_LEDGER_ENDPOINT`:
+  - `reconcileOperatorLedgers()` pulls canonical snapshot (`GET`) and refreshes local cache.
+  - `appendOperatorAudit()` / `appendDecisionLog()` now persist locally first, then attempt canonical `POST` write.
+  - Explicit degraded/offline ledger status is stored and surfaced through diagnostics when endpoint is missing or failing.
+- Added a shared freshness label formatter so freshness/degraded handling is consistent across Agents, Sessions, and Cron.
+- Added safe route-level code splitting in `App.tsx` using `React.lazy` + `Suspense` to reduce main bundle pressure without changing route behavior.
+- Expanded tests for canonical reconciliation, diagnostics degradation behavior, and freshness formatting.
 
-## Known Gaps
-- Receipts are still local-ledger first unless `VITE_RUNTIME_ACTION_ENDPOINT` is configured.
-- Decision log is local and not yet synced to a canonical runtime store.
+## Adapter Contract (Minimal)
+When `VITE_RUNTIME_LEDGER_ENDPOINT` is configured:
+- `GET /ledger` returns:
+  - `{ audit: OperatorAuditEntry[], decisions: DecisionLogEntry[], adapterHealth?: 'ok'|'degraded'|'offline', lastSyncAt?: string }`
+- `POST /ledger` accepts:
+  - `{ kind: 'audit' | 'decision', entry: OperatorAuditEntry | DecisionLogEntry }`
+
+If this endpoint is not configured or errors, the UI remains functional with local cache and marked degraded/offline diagnostics.
+
+## Remaining Gaps
+- Polling remains interval-based, no SSE/WebSocket transport yet.
+- Ledger endpoint contract is minimal and optimistic, auth/signature and conflict handling are not yet implemented.
 - No typed confirmation flow yet for destructive actions.
-- Polling is interval-based, no SSE/WebSocket transport yet.
 
 ## Demo / Run
 1. `cd app`

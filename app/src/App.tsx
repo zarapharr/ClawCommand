@@ -1,31 +1,31 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
-import { FactoryFloorPage } from '@/pages/FactoryFloorPage';
-import { AgentsPage } from '@/pages/AgentsPage';
-import { SkillsPage } from '@/pages/SkillsPage';
-import { TasksPage } from '@/pages/TasksPage';
-import { SessionsPage } from '@/pages/SessionsPage';
-import { CronPage } from '@/pages/CronPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { LogsPage } from '@/pages/LogsPage';
-import { BudgetPage } from '@/pages/BudgetPage';
-import { ChannelsPage } from '@/pages/ChannelsPage';
-import { ToolsPage } from '@/pages/ToolsPage';
-import { ModelsPage } from '@/pages/ModelsPage';
-import { AgentChatPage } from '@/pages/AgentChatPage';
-import { AgentSwarmPage } from '@/pages/AgentSwarmPage';
-import { VoicePage } from '@/pages/VoicePage';
-import { QMDPage } from '@/pages/QMDPage';
-import { MissionControlDemoPage } from '@/pages/MissionControlDemoPage';
-import WorkflowPage from '@/pages/WorkflowPage';
-import RoutingPage from '@/pages/RoutingPage';
-import AnalyticsPage from '@/pages/AnalyticsPage';
 import type { ViewType, SystemMetrics } from '@/types';
 import { mockSystemMetrics, mockAgents } from '@/data/mock-data';
 import { cn } from '@/lib/utils';
 
-// Placeholder pages for features not yet implemented
+const FactoryFloorPage = lazy(() => import('@/pages/FactoryFloorPage').then((m) => ({ default: m.FactoryFloorPage })));
+const AgentsPage = lazy(() => import('@/pages/AgentsPage').then((m) => ({ default: m.AgentsPage })));
+const SkillsPage = lazy(() => import('@/pages/SkillsPage').then((m) => ({ default: m.SkillsPage })));
+const TasksPage = lazy(() => import('@/pages/TasksPage').then((m) => ({ default: m.TasksPage })));
+const SessionsPage = lazy(() => import('@/pages/SessionsPage').then((m) => ({ default: m.SessionsPage })));
+const CronPage = lazy(() => import('@/pages/CronPage').then((m) => ({ default: m.CronPage })));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const LogsPage = lazy(() => import('@/pages/LogsPage').then((m) => ({ default: m.LogsPage })));
+const BudgetPage = lazy(() => import('@/pages/BudgetPage').then((m) => ({ default: m.BudgetPage })));
+const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })));
+const ToolsPage = lazy(() => import('@/pages/ToolsPage').then((m) => ({ default: m.ToolsPage })));
+const ModelsPage = lazy(() => import('@/pages/ModelsPage').then((m) => ({ default: m.ModelsPage })));
+const AgentChatPage = lazy(() => import('@/pages/AgentChatPage').then((m) => ({ default: m.AgentChatPage })));
+const AgentSwarmPage = lazy(() => import('@/pages/AgentSwarmPage').then((m) => ({ default: m.AgentSwarmPage })));
+const VoicePage = lazy(() => import('@/pages/VoicePage').then((m) => ({ default: m.VoicePage })));
+const QMDPage = lazy(() => import('@/pages/QMDPage').then((m) => ({ default: m.QMDPage })));
+const MissionControlDemoPage = lazy(() => import('@/pages/MissionControlDemoPage').then((m) => ({ default: m.MissionControlDemoPage })));
+const WorkflowPage = lazy(() => import('@/pages/WorkflowPage'));
+const RoutingPage = lazy(() => import('@/pages/RoutingPage'));
+const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage'));
+
 function PlaceholderPage({ title, description }: { title: string; icon: unknown; description: string }) {
   return (
     <div className="h-full flex items-center justify-center">
@@ -43,8 +43,8 @@ function PlaceholderPage({ title, description }: { title: string; icon: unknown;
 
 function WorkspacePage() {
   return (
-    <PlaceholderPage 
-      title="Workspace" 
+    <PlaceholderPage
+      title="Workspace"
       icon={null}
       description="File browser and editor for AGENTS.md, SOUL.md, TOOLS.md, and other configuration files."
     />
@@ -53,8 +53,8 @@ function WorkspacePage() {
 
 function MemoryPage() {
   return (
-    <PlaceholderPage 
-      title="Memory Explorer" 
+    <PlaceholderPage
+      title="Memory Explorer"
       icon={null}
       description="Search and manage agent memories and context."
     />
@@ -66,7 +66,6 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [metrics, setMetrics] = useState<SystemMetrics>(mockSystemMetrics);
 
-  // Simulate real-time metrics updates
   useEffect(() => {
     const interval = setInterval(() => {
       setMetrics(prev => ({
@@ -140,36 +139,35 @@ function App() {
 
   return (
     <div className="h-screen bg-slate-950 text-white overflow-hidden">
-      {/* Background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl" />
         <div className="absolute inset-0 tron-grid opacity-30" />
       </div>
 
-      {/* Sidebar */}
-      <Sidebar 
-        currentView={currentView} 
+      <Sidebar
+        currentView={currentView}
         onNavigate={setCurrentView}
         isOpen={isSidebarOpen}
       />
 
-      {/* Main Content */}
-      <div 
+      <div
         className={cn(
           'h-full flex flex-col transition-all duration-300',
           isSidebarOpen ? 'ml-64' : 'ml-16'
         )}
       >
-        <Header 
+        <Header
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           isSidebarOpen={isSidebarOpen}
           metrics={metrics}
           agentCount={{ online: onlineAgents, total: mockAgents.length }}
         />
-        
+
         <main className="flex-1 overflow-hidden relative">
-          {renderPage()}
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-slate-400">Loading view...</div>}>
+            {renderPage()}
+          </Suspense>
         </main>
       </div>
     </div>

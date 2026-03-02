@@ -56,6 +56,13 @@ type RuntimeBlob = {
   };
 };
 
+type LedgerSnapshot = {
+  audit?: OperatorAuditEntry[];
+  decisions?: DecisionLogEntry[];
+  adapterHealth?: 'ok' | 'degraded' | 'offline';
+  lastSyncAt?: string;
+};
+
 const STORAGE_KEYS = {
   runtime: 'clawcommand.runtime',
   agents: 'clawcommand.runtime.agents',
@@ -65,6 +72,7 @@ const STORAGE_KEYS = {
   decisions: 'clawcommand.operator.decisions',
   interaction: 'clawcommand.interaction.stats',
   diagnostics: 'clawcommand.runtime.diagnostics',
+  ledgerStatus: 'clawcommand.runtime.ledger.status',
 };
 
 const STALE_AFTER_MS = 90_000;
@@ -92,11 +100,34 @@ function runtimeBlob(): RuntimeBlob {
   return localBlob ?? {};
 }
 
+type LedgerAdapterHealth = {
+  adapterHealth: 'ok' | 'degraded' | 'offline';
+  note?: string;
+  lastSyncAt?: string;
+};
+
+function readLedgerStatus(): LedgerAdapterHealth {
+  if (typeof window === 'undefined') {
+    return { adapterHealth: 'degraded', note: 'No browser runtime context available.' };
+  }
+
+  return safeJsonParse<LedgerAdapterHealth>(localStorage.getItem(STORAGE_KEYS.ledgerStatus)) ?? {
+    adapterHealth: 'degraded',
+    note: 'Ledger endpoint not configured. Running in local ledger mode.',
+  };
+}
+
+function writeLedgerStatus(status: LedgerAdapterHealth): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEYS.ledgerStatus, JSON.stringify(status));
+}
+
 function getLastSyncAt(blob: RuntimeBlob): string | undefined {
   if (blob.diagnostics?.lastSyncAt) return blob.diagnostics.lastSyncAt;
   if (typeof window === 'undefined') return undefined;
   const diagnostics = safeJsonParse<{ lastSyncAt?: string }>(localStorage.getItem(STORAGE_KEYS.diagnostics));
-  return diagnostics?.lastSyncAt;
+  if (diagnostics?.lastSyncAt) return diagnostics.lastSyncAt;
+  return readLedgerStatus().lastSyncAt;
 }
 
 function toHealth(source: RuntimeSource, stale: boolean, adapterHealth?: 'ok' | 'degraded' | 'offline'): HealthState {
@@ -104,6 +135,21 @@ function toHealth(source: RuntimeSource, stale: boolean, adapterHealth?: 'ok' | 
   if (source === 'fallback') return 'offline';
   if (stale || adapterHealth === 'degraded') return 'degraded';
   return 'healthy';
+}
+
+export function formatFreshnessLabel(lastSyncAt?: string, freshnessMs?: number): string {
+  if (!lastSyncAt && freshnessMs === undefined) return 'unknown';
+
+  const ageMs = freshnessMs ?? (lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : undefined);
+  if (ageMs === undefined || Number.isNaN(ageMs)) return 'unknown';
+
+  if (ageMs < 1_000) return 'just now';
+  const seconds = Math.floor(ageMs / 1_000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
 }
 
 function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string, fallback: T): RuntimeFeed<T> {
@@ -115,8 +161,8 @@ function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string,
 
   const lastSyncAt = getLastSyncAt(blob);
   const freshnessMs = lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : undefined;
-  const stale = freshnessMs !== undefined && freshnessMs > STALE_AFTER_MS;
-  const adapterHealth = blob.diagnostics?.adapterHealth;
+  const stale = freshnessMs === undefined ? true : freshnessMs > STALE_AFTER_MS;
+  const adapterHealth = blob.diagnostics?.adapterHealth ?? readLedgerStatus().adapterHealth;
 
   if (fromBlob) {
     const source: RuntimeSource = 'live';
@@ -193,10 +239,105 @@ export function getInteractionStats(): RuntimeFeed<{ totalMessages: number; acti
 }
 
 export function getDiagnostics(): RuntimeFeed<{ adapterHealth: 'ok' | 'degraded' | 'offline'; lastSyncAt: string }> {
-  return getRuntimeCollection('diagnostics', STORAGE_KEYS.diagnostics, {
+  const feed = getRuntimeCollection<{ adapterHealth: 'ok' | 'degraded' | 'offline'; lastSyncAt: string }>('diagnostics', STORAGE_KEYS.diagnostics, {
     adapterHealth: 'degraded',
     lastSyncAt: new Date().toISOString(),
   });
+
+  const ledgerStatus = readLedgerStatus();
+  if (feed.source === 'fallback') {
+    return {
+      ...feed,
+      data: {
+        adapterHealth: ledgerStatus.adapterHealth,
+        lastSyncAt: ledgerStatus.lastSyncAt ?? feed.data.lastSyncAt,
+      },
+      note: ledgerStatus.note ?? feed.note,
+      health: toHealth(feed.source, feed.stale, ledgerStatus.adapterHealth),
+    };
+  }
+
+  return feed;
+}
+
+function readLocalDecisionLog(): DecisionLogEntry[] {
+  if (typeof window === 'undefined') return [];
+  return safeJsonParse<DecisionLogEntry[]>(localStorage.getItem(STORAGE_KEYS.decisions)) ?? [];
+}
+
+function writeLocalDecisionLog(entries: DecisionLogEntry[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEYS.decisions, JSON.stringify(entries.slice(0, 100)));
+}
+
+function readLocalOperatorAudit(): OperatorAuditEntry[] {
+  if (typeof window === 'undefined') return [];
+  return safeJsonParse<OperatorAuditEntry[]>(localStorage.getItem(STORAGE_KEYS.audit)) ?? [];
+}
+
+function writeLocalOperatorAudit(entries: OperatorAuditEntry[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify(entries.slice(0, 200)));
+}
+
+function ledgerEndpoint(): string | undefined {
+  return (import.meta.env.VITE_RUNTIME_LEDGER_ENDPOINT as string | undefined)?.trim();
+}
+
+export async function reconcileOperatorLedgers(): Promise<{ decisions: DecisionLogEntry[]; audit: OperatorAuditEntry[]; degraded: boolean; note?: string }> {
+  const endpoint = ledgerEndpoint();
+  if (!endpoint || typeof window === 'undefined') {
+    writeLedgerStatus({
+      adapterHealth: endpoint ? 'degraded' : 'offline',
+      note: endpoint ? 'Ledger endpoint unavailable in this runtime.' : 'Ledger endpoint not configured. Running in local ledger mode.',
+      lastSyncAt: new Date().toISOString(),
+    });
+    return {
+      decisions: readLocalDecisionLog(),
+      audit: readLocalOperatorAudit(),
+      degraded: true,
+      note: 'Using local-only ledger storage.',
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, { method: 'GET', headers: { Accept: 'application/json' } });
+    if (!response.ok) {
+      throw new Error(`Ledger endpoint failed with status ${response.status}`);
+    }
+
+    const snapshot = (await response.json()) as LedgerSnapshot;
+    const decisions = Array.isArray(snapshot.decisions) ? snapshot.decisions : [];
+    const audit = Array.isArray(snapshot.audit) ? snapshot.audit : [];
+    writeLocalDecisionLog(decisions);
+    writeLocalOperatorAudit(audit);
+
+    writeLedgerStatus({
+      adapterHealth: snapshot.adapterHealth ?? 'ok',
+      note: snapshot.adapterHealth === 'degraded' ? 'Ledger endpoint responded in degraded mode.' : undefined,
+      lastSyncAt: snapshot.lastSyncAt ?? new Date().toISOString(),
+    });
+
+    return {
+      decisions,
+      audit,
+      degraded: snapshot.adapterHealth === 'degraded',
+      note: snapshot.adapterHealth === 'degraded' ? 'Ledger endpoint responded in degraded mode.' : undefined,
+    };
+  } catch (error) {
+    writeLedgerStatus({
+      adapterHealth: 'degraded',
+      note: `Ledger sync failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      lastSyncAt: new Date().toISOString(),
+    });
+
+    return {
+      decisions: readLocalDecisionLog(),
+      audit: readLocalOperatorAudit(),
+      degraded: true,
+      note: 'Ledger sync failed, using local cache.',
+    };
+  }
 }
 
 export function sanitizePayloadPreview(payload: unknown): string {
@@ -205,25 +346,51 @@ export function sanitizePayloadPreview(payload: unknown): string {
   return redactValue(raw, defaultEnvironmentProfile.redaction).slice(0, 240);
 }
 
-export function appendDecisionLog(entry: Omit<DecisionLogEntry, 'id' | 'timestamp'>): DecisionLogEntry {
+async function persistLedgerEntry(kind: 'audit' | 'decision', entry: OperatorAuditEntry | DecisionLogEntry): Promise<void> {
+  const endpoint = ledgerEndpoint();
+  if (!endpoint || typeof window === 'undefined') return;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, entry }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ledger write failed with status ${response.status}`);
+  }
+
+  writeLedgerStatus({ adapterHealth: 'ok', lastSyncAt: new Date().toISOString() });
+}
+
+export async function appendDecisionLog(entry: Omit<DecisionLogEntry, 'id' | 'timestamp'>): Promise<DecisionLogEntry> {
   const fullEntry: DecisionLogEntry = {
     ...entry,
     id: `decision-${Date.now()}`,
     timestamp: new Date().toISOString(),
   };
 
-  if (typeof window === 'undefined') return fullEntry;
-  const existing = safeJsonParse<DecisionLogEntry[]>(localStorage.getItem(STORAGE_KEYS.decisions)) ?? [];
-  localStorage.setItem(STORAGE_KEYS.decisions, JSON.stringify([fullEntry, ...existing].slice(0, 100)));
+  const next = [fullEntry, ...readLocalDecisionLog()].slice(0, 100);
+  writeLocalDecisionLog(next);
+
+  try {
+    await persistLedgerEntry('decision', fullEntry);
+  } catch (error) {
+    writeLedgerStatus({
+      adapterHealth: 'degraded',
+      note: `Decision persistence degraded: ${error instanceof Error ? error.message : 'unknown error'}`,
+      lastSyncAt: new Date().toISOString(),
+    });
+  }
+
   return fullEntry;
 }
 
 export function readDecisionLog(): DecisionLogEntry[] {
-  if (typeof window === 'undefined') return [];
-  return safeJsonParse<DecisionLogEntry[]>(localStorage.getItem(STORAGE_KEYS.decisions)) ?? [];
+  return readLocalDecisionLog();
 }
 
-export function appendOperatorAudit(entry: Omit<OperatorAuditEntry, 'id' | 'timestamp' | 'commandId'>): OperatorAuditEntry {
+export async function appendOperatorAudit(entry: Omit<OperatorAuditEntry, 'id' | 'timestamp' | 'commandId'>): Promise<OperatorAuditEntry> {
   const fullEntry: OperatorAuditEntry = {
     ...entry,
     id: `audit-${Date.now()}`,
@@ -231,16 +398,24 @@ export function appendOperatorAudit(entry: Omit<OperatorAuditEntry, 'id' | 'time
     timestamp: new Date().toISOString(),
   };
 
-  if (typeof window === 'undefined') return fullEntry;
+  const next = [fullEntry, ...readLocalOperatorAudit()].slice(0, 200);
+  writeLocalOperatorAudit(next);
 
-  const existing = safeJsonParse<OperatorAuditEntry[]>(localStorage.getItem(STORAGE_KEYS.audit)) ?? [];
-  localStorage.setItem(STORAGE_KEYS.audit, JSON.stringify([fullEntry, ...existing].slice(0, 200)));
+  try {
+    await persistLedgerEntry('audit', fullEntry);
+  } catch (error) {
+    writeLedgerStatus({
+      adapterHealth: 'degraded',
+      note: `Audit persistence degraded: ${error instanceof Error ? error.message : 'unknown error'}`,
+      lastSyncAt: new Date().toISOString(),
+    });
+  }
+
   return fullEntry;
 }
 
 export function readOperatorAudit(): OperatorAuditEntry[] {
-  if (typeof window === 'undefined') return [];
-  return safeJsonParse<OperatorAuditEntry[]>(localStorage.getItem(STORAGE_KEYS.audit)) ?? [];
+  return readLocalOperatorAudit();
 }
 
 export async function runOperatorAction(input: {
@@ -266,14 +441,14 @@ export async function runOperatorAction(input: {
       }
     }
 
-    appendDecisionLog({
+    await appendDecisionLog({
       decision: `${input.action} ${input.targetType}:${input.targetId}`,
       reason: 'Operator invoked action from mission control UI',
       targetId: input.targetId,
       targetType: input.targetType,
     });
 
-    return appendOperatorAudit({
+    return await appendOperatorAudit({
       action: input.action,
       actor: 'mission-control-ui',
       source: input.source,

@@ -1,10 +1,20 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { appendDecisionLog, appendOperatorAudit, readDecisionLog, readOperatorAudit, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import {
+  appendDecisionLog,
+  appendOperatorAudit,
+  formatFreshnessLabel,
+  getDiagnostics,
+  readDecisionLog,
+  readOperatorAudit,
+  reconcileOperatorLedgers,
+  sanitizePayloadPreview,
+} from '@/lib/runtime-adapters';
 
 describe('runtime adapters', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('sanitizes payload previews and caps length', () => {
@@ -13,8 +23,8 @@ describe('runtime adapters', () => {
     expect(preview).toContain('message');
   });
 
-  it('stores operator audit receipts with command ids', () => {
-    const receipt = appendOperatorAudit({
+  it('stores operator audit receipts with command ids', async () => {
+    const receipt = await appendOperatorAudit({
       action: 'retry',
       actor: 'test',
       payloadPreview: 'safe',
@@ -29,8 +39,8 @@ describe('runtime adapters', () => {
     expect(readOperatorAudit()[0].targetId).toBe('session-1');
   });
 
-  it('stores decision log entries', () => {
-    appendDecisionLog({
+  it('stores decision log entries', async () => {
+    await appendDecisionLog({
       decision: 'retry cron:job-1',
       reason: 'unit-test',
       targetId: 'job-1',
@@ -39,5 +49,57 @@ describe('runtime adapters', () => {
 
     expect(readDecisionLog()).toHaveLength(1);
     expect(readDecisionLog()[0].reason).toBe('unit-test');
+  });
+
+  it('reconciles canonical ledgers from runtime endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        audit: [{
+          id: 'audit-1',
+          commandId: 'cmd-1',
+          timestamp: new Date().toISOString(),
+          targetType: 'agent',
+          targetId: 'agent-1',
+          action: 'start',
+          actor: 'runtime',
+          source: 'live',
+          payloadPreview: 'none',
+          status: 'success',
+        }],
+        decisions: [{
+          id: 'decision-1',
+          timestamp: new Date().toISOString(),
+          decision: 'start agent:agent-1',
+          reason: 'operator request',
+          targetType: 'agent',
+          targetId: 'agent-1',
+        }],
+        adapterHealth: 'ok',
+        lastSyncAt: new Date().toISOString(),
+      }),
+    }));
+
+    vi.stubEnv('VITE_RUNTIME_LEDGER_ENDPOINT', 'https://runtime.example/ledger');
+
+    const snapshot = await reconcileOperatorLedgers();
+    expect(snapshot.degraded).toBe(false);
+    expect(readOperatorAudit()).toHaveLength(1);
+    expect(readDecisionLog()).toHaveLength(1);
+  });
+
+  it('marks diagnostics degraded when ledger endpoint is unavailable', async () => {
+    vi.unstubAllEnvs();
+
+    await reconcileOperatorLedgers();
+    const diagnostics = getDiagnostics();
+    expect(diagnostics.data.adapterHealth).toBe('offline');
+    expect(diagnostics.health).toBe('offline');
+  });
+
+  it('formats freshness labels consistently', () => {
+    expect(formatFreshnessLabel(undefined, undefined)).toBe('unknown');
+    expect(formatFreshnessLabel(new Date(Date.now() - 4_000).toISOString())).toBe('4s ago');
+    expect(formatFreshnessLabel(undefined, 120_000)).toBe('2m ago');
   });
 });

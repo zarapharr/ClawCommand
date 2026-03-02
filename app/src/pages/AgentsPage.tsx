@@ -15,7 +15,7 @@ import {
   MessageSquare, Cpu, Wrench, FolderOpen, FileText, ShieldCheck,
 } from 'lucide-react';
 import { StatusIndicator } from '@/components/factory-floor/StatusIndicator';
-import { getAgentsFeed, getDiagnostics, getInteractionStats, readDecisionLog, readOperatorAudit, runOperatorAction } from '@/lib/runtime-adapters';
+import { getAgentsFeed, getDiagnostics, getInteractionStats, readDecisionLog, readOperatorAudit, reconcileOperatorLedgers, runOperatorAction } from '@/lib/runtime-adapters';
 import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
 import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
 import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
@@ -43,6 +43,13 @@ export function AgentsPage() {
     setAgents(agentsFeed.data);
     setSelectedAgent((prev) => agentsFeed.data.find((agent) => agent.id === prev?.id) ?? agentsFeed.data[0] ?? null);
   }, [agentsFeed.data]);
+
+  useEffect(() => {
+    void reconcileOperatorLedgers().then(({ audit, decisions: syncedDecisions }) => {
+      setAuditLog(audit);
+      setDecisions(syncedDecisions);
+    });
+  }, []);
 
   const filteredAgents = agents.filter((agent) =>
     agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||

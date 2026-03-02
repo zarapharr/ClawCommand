@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { RuntimeFeed } from '@/lib/runtime-adapters';
+import { formatFreshnessLabel, type RuntimeFeed } from '@/lib/runtime-adapters';
 
 interface UseRuntimeFeedOptions<T> {
   loader: () => RuntimeFeed<T>;
@@ -29,14 +29,7 @@ export function useRuntimeFeed<T>({ loader, refreshMs = 10_000 }: UseRuntimeFeed
     return () => window.clearInterval(interval);
   }, [loader, refreshMs]);
 
-  const freshnessLabel = useMemo(() => {
-    if (!feed.lastSyncAt) return 'unknown';
-    const ageMs = Date.now() - new Date(feed.lastSyncAt).getTime();
-    const seconds = Math.floor(ageMs / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}m ago`;
-  }, [feed.lastSyncAt, feed.freshnessMs]);
+  const freshnessLabel = useMemo(() => formatFreshnessLabel(feed.lastSyncAt, feed.freshnessMs), [feed.lastSyncAt, feed.freshnessMs]);
 
   return {
     feed,

@@ -13,7 +13,7 @@ import {
   CheckCircle2, XCircle, RotateCw,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import { getCronFeed, getDiagnostics, readOperatorAudit, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import { getCronFeed, getDiagnostics, readOperatorAudit, reconcileOperatorLedgers, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
 import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
 import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
 import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
@@ -40,6 +40,12 @@ export function CronPage() {
   useEffect(() => {
     setJobs(cronFeed.data);
   }, [cronFeed.data]);
+
+  useEffect(() => {
+    void reconcileOperatorLedgers().then(({ audit: syncedAudit }) => {
+      setAudit(syncedAudit);
+    });
+  }, []);
 
   const executeAction = async () => {
     if (!pendingAction) return;

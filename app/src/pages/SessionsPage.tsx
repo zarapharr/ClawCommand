@@ -19,7 +19,7 @@ import { ActionReceiptLedger } from '@/components/runtime/ActionReceiptLedger';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getDiagnostics, getSessionsFeed, readOperatorAudit, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import { getDiagnostics, getSessionsFeed, readOperatorAudit, reconcileOperatorLedgers, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
 
 export function SessionsPage() {
   const sessionsLoader = useCallback(() => getSessionsFeed(), []);
@@ -44,6 +44,12 @@ export function SessionsPage() {
     setSessions(sessionsFeed.data);
     setSelectedSessionId((prev) => (sessionsFeed.data.find((s) => s.id === prev)?.id ?? sessionsFeed.data[0]?.id ?? null));
   }, [sessionsFeed.data]);
+
+  useEffect(() => {
+    void reconcileOperatorLedgers().then(({ audit }) => {
+      setAuditLog(audit);
+    });
+  }, []);
 
   const handleSendMessage = () => {
     if (!messageInput.trim() || !selectedSessionId) return;

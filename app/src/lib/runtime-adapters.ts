@@ -4,16 +4,22 @@ import { defaultEnvironmentProfile } from '@/config/environment-profile';
 import { redactValue } from '@/lib/environment-session';
 
 export type RuntimeSource = 'live' | 'fallback';
+export type HealthState = 'healthy' | 'degraded' | 'offline';
 
 export interface RuntimeFeed<T> {
   data: T;
   source: RuntimeSource;
   path: string;
   note?: string;
+  lastSyncAt?: string;
+  freshnessMs?: number;
+  health: HealthState;
+  stale: boolean;
 }
 
 export interface OperatorAuditEntry {
   id: string;
+  commandId: string;
   timestamp: string;
   targetType: 'agent' | 'session' | 'cron';
   targetId: string;
@@ -21,6 +27,18 @@ export interface OperatorAuditEntry {
   actor: string;
   source: RuntimeSource;
   payloadPreview: string;
+  status: 'success' | 'failed';
+  result?: string;
+  error?: string;
+}
+
+export interface DecisionLogEntry {
+  id: string;
+  timestamp: string;
+  decision: string;
+  reason: string;
+  targetType: OperatorAuditEntry['targetType'];
+  targetId: string;
 }
 
 type RuntimeBlob = {
@@ -44,9 +62,16 @@ const STORAGE_KEYS = {
   sessions: 'clawcommand.runtime.sessions',
   cron: 'clawcommand.runtime.cron',
   audit: 'clawcommand.audit.actions',
+  decisions: 'clawcommand.operator.decisions',
   interaction: 'clawcommand.interaction.stats',
   diagnostics: 'clawcommand.runtime.diagnostics',
 };
+
+const STALE_AFTER_MS = 90_000;
+
+function isProduction(): boolean {
+  return (import.meta.env.MODE === 'production') || (import.meta.env.VITE_DISABLE_MOCK_FALLBACK === '1');
+}
 
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
@@ -67,6 +92,20 @@ function runtimeBlob(): RuntimeBlob {
   return localBlob ?? {};
 }
 
+function getLastSyncAt(blob: RuntimeBlob): string | undefined {
+  if (blob.diagnostics?.lastSyncAt) return blob.diagnostics.lastSyncAt;
+  if (typeof window === 'undefined') return undefined;
+  const diagnostics = safeJsonParse<{ lastSyncAt?: string }>(localStorage.getItem(STORAGE_KEYS.diagnostics));
+  return diagnostics?.lastSyncAt;
+}
+
+function toHealth(source: RuntimeSource, stale: boolean, adapterHealth?: 'ok' | 'degraded' | 'offline'): HealthState {
+  if (adapterHealth === 'offline') return 'offline';
+  if (source === 'fallback') return 'offline';
+  if (stale || adapterHealth === 'degraded') return 'degraded';
+  return 'healthy';
+}
+
 function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string, fallback: T): RuntimeFeed<T> {
   const blob = runtimeBlob();
   const fromBlob = candidatePath.split('.').reduce<unknown>((acc, key) => {
@@ -74,15 +113,51 @@ function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string,
     return (acc as Record<string, unknown>)[key];
   }, blob);
 
+  const lastSyncAt = getLastSyncAt(blob);
+  const freshnessMs = lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : undefined;
+  const stale = freshnessMs !== undefined && freshnessMs > STALE_AFTER_MS;
+  const adapterHealth = blob.diagnostics?.adapterHealth;
+
   if (fromBlob) {
-    return { data: fromBlob as T, source: 'live', path: `window.__CLAWCOMMAND_RUNTIME__.${candidatePath}` };
+    const source: RuntimeSource = 'live';
+    return {
+      data: fromBlob as T,
+      source,
+      path: `window.__CLAWCOMMAND_RUNTIME__.${candidatePath}`,
+      lastSyncAt,
+      freshnessMs,
+      stale,
+      health: toHealth(source, stale, adapterHealth),
+    };
   }
 
   if (typeof window !== 'undefined') {
     const fromStorage = safeJsonParse<T>(localStorage.getItem(localStorageKey));
     if (fromStorage) {
-      return { data: fromStorage, source: 'live', path: `localStorage:${localStorageKey}` };
+      const source: RuntimeSource = 'live';
+      return {
+        data: fromStorage,
+        source,
+        path: `localStorage:${localStorageKey}`,
+        lastSyncAt,
+        freshnessMs,
+        stale,
+        health: toHealth(source, stale, adapterHealth),
+      };
     }
+  }
+
+  if (isProduction()) {
+    return {
+      data: Array.isArray(fallback) ? [] as T : fallback,
+      source: 'fallback',
+      path: `disabled-fallback:${localStorageKey}`,
+      note: 'Runtime adapter data unavailable. Mock fallback disabled for production readiness.',
+      lastSyncAt,
+      freshnessMs,
+      stale: true,
+      health: 'offline',
+    };
   }
 
   return {
@@ -90,6 +165,10 @@ function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string,
     source: 'fallback',
     path: `mock:${localStorageKey}`,
     note: 'No runtime adapter data detected, using safe fallback.',
+    lastSyncAt,
+    freshnessMs,
+    stale: true,
+    health: 'degraded',
   };
 }
 
@@ -126,10 +205,29 @@ export function sanitizePayloadPreview(payload: unknown): string {
   return redactValue(raw, defaultEnvironmentProfile.redaction).slice(0, 240);
 }
 
-export function appendOperatorAudit(entry: Omit<OperatorAuditEntry, 'id' | 'timestamp'>): OperatorAuditEntry {
+export function appendDecisionLog(entry: Omit<DecisionLogEntry, 'id' | 'timestamp'>): DecisionLogEntry {
+  const fullEntry: DecisionLogEntry = {
+    ...entry,
+    id: `decision-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (typeof window === 'undefined') return fullEntry;
+  const existing = safeJsonParse<DecisionLogEntry[]>(localStorage.getItem(STORAGE_KEYS.decisions)) ?? [];
+  localStorage.setItem(STORAGE_KEYS.decisions, JSON.stringify([fullEntry, ...existing].slice(0, 100)));
+  return fullEntry;
+}
+
+export function readDecisionLog(): DecisionLogEntry[] {
+  if (typeof window === 'undefined') return [];
+  return safeJsonParse<DecisionLogEntry[]>(localStorage.getItem(STORAGE_KEYS.decisions)) ?? [];
+}
+
+export function appendOperatorAudit(entry: Omit<OperatorAuditEntry, 'id' | 'timestamp' | 'commandId'>): OperatorAuditEntry {
   const fullEntry: OperatorAuditEntry = {
     ...entry,
     id: `audit-${Date.now()}`,
+    commandId: `cmd-${Date.now()}`,
     timestamp: new Date().toISOString(),
   };
 
@@ -155,20 +253,46 @@ export async function runOperatorAction(input: {
   const endpoint = (import.meta.env.VITE_RUNTIME_ACTION_ENDPOINT as string | undefined)?.trim();
   const payloadPreview = sanitizePayloadPreview(input.payload ?? {});
 
-  if (endpoint) {
-    await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...input, payloadPreview }),
+  try {
+    if (endpoint) {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...input, payloadPreview }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Action endpoint failed with status ${response.status}`);
+      }
+    }
+
+    appendDecisionLog({
+      decision: `${input.action} ${input.targetType}:${input.targetId}`,
+      reason: 'Operator invoked action from mission control UI',
+      targetId: input.targetId,
+      targetType: input.targetType,
+    });
+
+    return appendOperatorAudit({
+      action: input.action,
+      actor: 'mission-control-ui',
+      source: input.source,
+      targetId: input.targetId,
+      targetType: input.targetType,
+      payloadPreview,
+      status: 'success',
+      result: endpoint ? 'Dispatched to runtime endpoint' : 'Captured in local action ledger',
+    });
+  } catch (error) {
+    return appendOperatorAudit({
+      action: input.action,
+      actor: 'mission-control-ui',
+      source: input.source,
+      targetId: input.targetId,
+      targetType: input.targetType,
+      payloadPreview,
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown action failure',
     });
   }
-
-  return appendOperatorAudit({
-    action: input.action,
-    actor: 'mission-control-ui',
-    source: input.source,
-    targetId: input.targetId,
-    targetType: input.targetType,
-    payloadPreview,
-  });
 }

@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Session, Message } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -13,15 +12,24 @@ import {
   MessageSquare, Search, Send, MoreHorizontal,
   Archive, Download, Trash2, Shield,
 } from 'lucide-react';
+import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
+import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
+import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
+import { ActionReceiptLedger } from '@/components/runtime/ActionReceiptLedger';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getSessionsFeed, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import { getDiagnostics, getSessionsFeed, readOperatorAudit, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
 
 export function SessionsPage() {
-  const sessionsFeed = useMemo(() => getSessionsFeed(), []);
+  const sessionsLoader = useCallback(() => getSessionsFeed(), []);
+  const diagnosticsLoader = useCallback(() => getDiagnostics(), []);
+  const { feed: sessionsFeed, loading, error, freshnessLabel } = useRuntimeFeed({ loader: sessionsLoader });
+  const { feed: diagnosticsFeed } = useRuntimeFeed({ loader: diagnosticsLoader });
+
   const [sessions, setSessions] = useState<Session[]>(sessionsFeed.data);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(sessionsFeed.data[0]?.id || null);
+  const [auditLog, setAuditLog] = useState(readOperatorAudit());
   const [messageInput, setMessageInput] = useState('');
   const [pendingAction, setPendingAction] = useState<{ id: string; action: 'stop' | 'retry' | 'escalate' | 'kill' } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -31,6 +39,11 @@ export function SessionsPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedSession?.messages]);
+
+  useEffect(() => {
+    setSessions(sessionsFeed.data);
+    setSelectedSessionId((prev) => (sessionsFeed.data.find((s) => s.id === prev)?.id ?? sessionsFeed.data[0]?.id ?? null));
+  }, [sessionsFeed.data]);
 
   const handleSendMessage = () => {
     if (!messageInput.trim() || !selectedSessionId) return;
@@ -83,6 +96,7 @@ export function SessionsPage() {
       if (pendingAction.action === 'kill' || pendingAction.action === 'stop') return { ...session, status: 'archived' };
       return { ...session, status: 'active', lastActivity: new Date().toISOString() };
     }));
+    setAuditLog(readOperatorAudit());
     setPendingAction(null);
   };
 
@@ -98,13 +112,17 @@ export function SessionsPage() {
             <h1 className="text-xl font-bold text-white"><span className="text-cyan-400">Session</span> Center</h1>
             <p className="text-xs text-slate-400">View and interact with agent sessions</p>
           </div>
-          <Badge variant="outline" className={cn('text-xs', sessionsFeed.source === 'live' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-300')}>{sessionsFeed.source} | {sessionsFeed.path}</Badge>
+          <RuntimeStatusBar feed={sessionsFeed} loading={loading} error={error} freshnessLabel={freshnessLabel} />
         </div>
 
         <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><Input placeholder="Search sessions..." className="pl-10 w-64 bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-500" /></div>
       </div>
 
       <div className="px-6 py-2 text-xs text-slate-500 flex items-center gap-2"><Shield className="w-3 h-3" /> Message content is redacted before send and before payload display.</div>
+      <div className="px-6 pb-2 grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <HealthConnectionPanel feed={sessionsFeed} diagnosticsFeed={diagnosticsFeed} title="Session Stream Health" />
+        <ActionReceiptLedger entries={auditLog} />
+      </div>
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-80 border-r border-slate-800/50 flex flex-col">

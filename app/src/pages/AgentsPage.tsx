@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Agent } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -15,12 +15,21 @@ import {
   MessageSquare, Cpu, Wrench, FolderOpen, FileText, ShieldCheck,
 } from 'lucide-react';
 import { StatusIndicator } from '@/components/factory-floor/StatusIndicator';
-import { getAgentsFeed, getDiagnostics, getInteractionStats, readOperatorAudit, runOperatorAction } from '@/lib/runtime-adapters';
+import { getAgentsFeed, getDiagnostics, getInteractionStats, readDecisionLog, readOperatorAudit, runOperatorAction } from '@/lib/runtime-adapters';
+import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
+import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
+import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
+import { ActionReceiptLedger } from '@/components/runtime/ActionReceiptLedger';
+import { DecisionLogPanel } from '@/components/runtime/DecisionLogPanel';
 
 export function AgentsPage() {
-  const agentsFeed = useMemo(() => getAgentsFeed(), []);
-  const diagnosticsFeed = useMemo(() => getDiagnostics(), []);
-  const interactionFeed = useMemo(() => getInteractionStats(), []);
+  const agentsLoader = useCallback(() => getAgentsFeed(), []);
+  const diagnosticsLoader = useCallback(() => getDiagnostics(), []);
+  const interactionLoader = useCallback(() => getInteractionStats(), []);
+
+  const { feed: agentsFeed, loading: agentsLoading, error: agentsError, freshnessLabel } = useRuntimeFeed({ loader: agentsLoader });
+  const { feed: diagnosticsFeed } = useRuntimeFeed({ loader: diagnosticsLoader });
+  const { feed: interactionFeed } = useRuntimeFeed({ loader: interactionLoader });
 
   const [agents, setAgents] = useState<Agent[]>(agentsFeed.data);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(agentsFeed.data[0] ?? null);
@@ -28,6 +37,12 @@ export function AgentsPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ id: string; action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate' } | null>(null);
   const [auditLog, setAuditLog] = useState(readOperatorAudit());
+  const [decisions, setDecisions] = useState(readDecisionLog());
+
+  useEffect(() => {
+    setAgents(agentsFeed.data);
+    setSelectedAgent((prev) => agentsFeed.data.find((agent) => agent.id === prev?.id) ?? agentsFeed.data[0] ?? null);
+  }, [agentsFeed.data]);
 
   const filteredAgents = agents.filter((agent) =>
     agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -73,6 +88,7 @@ export function AgentsPage() {
     }));
 
     setAuditLog(readOperatorAudit());
+    setDecisions(readDecisionLog());
     setPendingAction(null);
   };
 
@@ -87,9 +103,7 @@ export function AgentsPage() {
             <h1 className="text-xl font-bold text-white"><span className="text-cyan-400">Agent</span> Command</h1>
             <p className="text-xs text-slate-400">Manage your AI workforce</p>
           </div>
-          <Badge variant="outline" className={cn('text-xs', agentsFeed.source === 'live' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-300')}>
-            {agentsFeed.source === 'live' ? `Live: ${agentsFeed.path}` : `Fallback: ${agentsFeed.path}`}
-          </Badge>
+          <RuntimeStatusBar feed={agentsFeed} loading={agentsLoading} error={agentsError} freshnessLabel={freshnessLabel} />
         </div>
 
         <div className="flex items-center gap-3">
@@ -101,11 +115,11 @@ export function AgentsPage() {
         </div>
       </div>
 
-      <div className="px-6 pt-4 grid grid-cols-4 gap-3">
+      <div className="px-6 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Interactions</p><p className="text-lg text-cyan-300 font-semibold">{interactionFeed.data.totalMessages}</p></div>
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Active sessions</p><p className="text-lg text-cyan-300 font-semibold">{interactionFeed.data.activeSessions}</p></div>
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Errors (1h)</p><p className="text-lg text-red-300 font-semibold">{interactionFeed.data.errorsLastHour}</p></div>
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Adapter health</p><p className="text-lg text-emerald-300 font-semibold">{diagnosticsFeed.data.adapterHealth}</p></div>
+        <HealthConnectionPanel feed={agentsFeed} diagnosticsFeed={diagnosticsFeed} title="Health + Connection" />
       </div>
 
       <div className="flex-1 flex overflow-hidden mt-3">
@@ -149,13 +163,15 @@ export function AgentsPage() {
                 </div>
               </div>
 
-              <div className="mb-4 p-3 rounded-lg border border-slate-800 bg-slate-900/30">
-                <div className="flex items-center gap-2 text-slate-300 mb-2"><ShieldCheck className="w-4 h-4 text-cyan-400" /> Governance audit trail</div>
-                <p className="text-xs text-slate-400">Last actions are persisted to local audit storage with payload redaction checks.</p>
-                <div className="mt-2 space-y-1">
-                  {auditLog.slice(0, 3).map((item) => (
-                    <p key={item.id} className="text-xs text-slate-500">{new Date(item.timestamp).toLocaleTimeString()} {item.action} {item.targetType}:{item.targetId}</p>
-                  ))}
+              <div className="mb-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div className="lg:col-span-3 flex items-center gap-2 text-slate-300"><ShieldCheck className="w-4 h-4 text-cyan-400" /> Governance audit trail</div>
+                <ActionReceiptLedger entries={auditLog} />
+                <DecisionLogPanel decisions={decisions} />
+                <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Data Quality</p>
+                  <p className="text-xs text-slate-500">State: {agentsFeed.health}</p>
+                  <p className="text-xs text-slate-500">Freshness: {freshnessLabel}</p>
+                  <p className="text-xs text-slate-500">Path: {agentsFeed.path}</p>
                 </div>
               </div>
 

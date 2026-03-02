@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CronJob } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,11 @@ import {
   CheckCircle2, XCircle, RotateCw,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import { getCronFeed, readOperatorAudit, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import { getCronFeed, getDiagnostics, readOperatorAudit, runOperatorAction, sanitizePayloadPreview } from '@/lib/runtime-adapters';
+import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
+import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
+import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
+import { ActionReceiptLedger } from '@/components/runtime/ActionReceiptLedger';
 
 const statusConfig = {
   pending: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', icon: Clock },
@@ -24,10 +28,18 @@ const statusConfig = {
 };
 
 export function CronPage() {
-  const cronFeed = useMemo(() => getCronFeed(), []);
+  const cronLoader = useCallback(() => getCronFeed(), []);
+  const diagnosticsLoader = useCallback(() => getDiagnostics(), []);
+  const { feed: cronFeed, loading, error, freshnessLabel } = useRuntimeFeed({ loader: cronLoader });
+  const { feed: diagnosticsFeed } = useRuntimeFeed({ loader: diagnosticsLoader });
+
   const [jobs, setJobs] = useState<CronJob[]>(cronFeed.data);
   const [pendingAction, setPendingAction] = useState<{ id: string; action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate' } | null>(null);
-  const [audit] = useState(readOperatorAudit());
+  const [audit, setAudit] = useState(readOperatorAudit());
+
+  useEffect(() => {
+    setJobs(cronFeed.data);
+  }, [cronFeed.data]);
 
   const executeAction = async () => {
     if (!pendingAction) return;
@@ -48,6 +60,7 @@ export function CronPage() {
       return { ...j, status: 'failed', errorCount: j.errorCount + 1 };
     }));
 
+    setAudit(readOperatorAudit());
     setPendingAction(null);
   };
 
@@ -70,12 +83,16 @@ export function CronPage() {
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-yellow-500/20 border border-orange-500/30 flex items-center justify-center"><Clock className="w-5 h-5 text-orange-400" /></div>
           <div><h1 className="text-xl font-bold text-white"><span className="text-orange-400">Cron</span> Scheduler</h1><p className="text-xs text-slate-400">Schedule and manage recurring jobs</p></div>
-          <Badge variant="outline" className={cn('text-xs', cronFeed.source === 'live' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-300')}>{cronFeed.source} | {cronFeed.path}</Badge>
+          <RuntimeStatusBar feed={cronFeed} loading={loading} error={error} freshnessLabel={freshnessLabel} />
         </div>
         <Button className="bg-orange-500 hover:bg-orange-600 text-black font-medium"><Plus className="w-4 h-4 mr-2" />New Job</Button>
       </div>
 
       <div className="px-6 py-2 text-xs text-slate-500">Observability source: cron log adapter with fallback-safe payload redaction. Recent audited actions: {audit.length}</div>
+      <div className="px-6 pb-2 grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <HealthConnectionPanel feed={cronFeed} diagnosticsFeed={diagnosticsFeed} title="Cron Health + Connection" />
+        <ActionReceiptLedger entries={audit} />
+      </div>
 
       <div className="flex-1 overflow-hidden p-6">
         <div className="holo-card h-full flex flex-col">

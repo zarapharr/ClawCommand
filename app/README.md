@@ -61,7 +61,12 @@ npm run build
 
 ## Environment Variables
 
-Create a `.env` file in the root directory:
+No manual setup required for local runs.
+Before `dev`, `test`, and `build`, the app auto-generates `app/.env.local` from workspace env plus safe defaults.
+
+Manual override if needed: create or edit `app/.env.local`.
+
+Reference values:
 
 ```env
 # Required for live P0 integrations (Agents, Models, Memory, Chat, Factory Floor, Swarm)

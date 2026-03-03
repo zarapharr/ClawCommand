@@ -48,12 +48,12 @@ describe('openclaw api client', () => {
     vi.useRealTimers();
   });
 
-  it('returns explicit config errors when base url missing', async () => {
+  it('uses default local API base when env base is missing', async () => {
     vi.stubEnv('VITE_OPENCLAW_API_BASE', '');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
+
     const result = await fetchAgents();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('VITE_OPENCLAW_API_BASE');
-    }
+    expect(result.ok).toBe(true);
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3001/api/agents', expect.any(Object));
   });
 });

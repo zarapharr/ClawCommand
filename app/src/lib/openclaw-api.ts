@@ -14,8 +14,10 @@ import type { Agent, Session, Message } from '@/types';
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
-function apiBase(): string | undefined {
-  return (import.meta.env.VITE_OPENCLAW_API_BASE as string | undefined)?.replace(/\/$/, '');
+const DEFAULT_OPENCLAW_API_BASE = 'http://127.0.0.1:3001';
+
+function apiBase(): string {
+  return ((import.meta.env.VITE_OPENCLAW_API_BASE as string | undefined)?.replace(/\/$/, '')) || DEFAULT_OPENCLAW_API_BASE;
 }
 
 function apiToken(): string | undefined {
@@ -23,7 +25,7 @@ function apiToken(): string | undefined {
 }
 
 export function isApiConfigured(): boolean {
-  return !!apiBase();
+  return true;
 }
 
 // ─── Shared types ──────────────────────────────────────────────────────────
@@ -117,10 +119,6 @@ function buildHeaders(): Record<string, string> {
 
 async function apiFetch<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<ApiResult<T>> {
   const base = apiBase();
-  if (!base) {
-    return { ok: false, error: 'VITE_OPENCLAW_API_BASE not configured', status: null, retryable: false };
-  }
-
   const url = `${base}${path}`;
   try {
     const response = await fetch(url, {

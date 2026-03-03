@@ -90,7 +90,7 @@ describe('runtime adapters', () => {
   });
 
   it('marks diagnostics degraded when ledger endpoint is unavailable', async () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv('VITE_RUNTIME_LEDGER_ENDPOINT', '');
 
     await reconcileOperatorLedgers();
     const diagnostics = getDiagnostics();

@@ -1,4 +1,5 @@
 import type { Agent, Message, Session } from '@/types';
+import { agentActionMatrix, contracts, gatewayMethodMatrix, mapAgent, mapHistoryMessage, mapSession, sessionActionMatrix, type ActionMatrixKey } from '@/lib/openclaw-contract';
 
 const DEFAULT_GATEWAY_URL = 'ws://127.0.0.1:18789';
 
@@ -39,9 +40,10 @@ export interface MemoryFileEntry {
   size: number;
   modifiedAt: string;
   isDirectory: boolean;
+  agentId: string;
 }
-export interface MemoryIndex { files: MemoryFileEntry[]; root: string; }
-export interface MemoryFileContent { path: string; content: string; size: number; modifiedAt: string; }
+export interface MemoryIndex { files: MemoryFileEntry[]; root: string; agentId: string; }
+export interface MemoryFileContent { path: string; content: string; size: number; modifiedAt: string; agentId: string; }
 
 export interface SubagentStatus {
   id: string;
@@ -67,7 +69,7 @@ export interface SendMessageResponse { userMessage: Message; assistantMessage?: 
 export interface ActionRequest {
   targetType: 'agent' | 'session' | 'cron';
   targetId: string;
-  action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate';
+  action: ActionMatrixKey;
   payload?: unknown;
 }
 
@@ -82,10 +84,21 @@ export interface ActionReceipt {
 
 type RpcReq = { type: 'req'; id: string; method: string; params?: Record<string, unknown> };
 type RpcRes = { type: 'res'; id: string; ok: boolean; payload?: unknown; error?: { message?: string; code?: string } };
+type RpcEvent = { type: 'event'; event: string; payload?: unknown };
+
+export interface RuntimeLiveUpdate {
+  kind: 'tick' | 'chat' | 'agent_status' | 'subagents' | 'unknown';
+  payload: unknown;
+  timestamp: string;
+}
 
 function randomId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getError(message: string, retryable = true): ApiErr {
+  return { ok: false, error: message, status: null, retryable };
 }
 
 async function callGateway<T>(method: string, params: Record<string, unknown> = {}): Promise<ApiResult<T>> {
@@ -106,12 +119,13 @@ async function callGateway<T>(method: string, params: Record<string, unknown> = 
   }
 
   const url = gatewayUrl();
-  if (!url) return { ok: false, error: 'Missing VITE_OPENCLAW_GATEWAY_URL.', status: null, retryable: false };
+  if (!url) return getError('Missing VITE_OPENCLAW_GATEWAY_URL.', false);
 
   return new Promise((resolve) => {
     const ws = new WebSocket(url);
     const reqId = randomId();
     let settled = false;
+    let handshakeReady = false;
 
     const fail = (error: string, retryable = true) => {
       if (settled) return;
@@ -127,9 +141,7 @@ async function callGateway<T>(method: string, params: Record<string, unknown> = 
       resolve({ ok: true, data: payload as T, status: 200 });
     };
 
-    const timer = window.setTimeout(() => fail(`Gateway timeout calling ${method}.`), 10_000);
-
-    ws.onopen = () => {
+    const sendConnect = () => {
       const auth = gatewayToken() || gatewayPassword() ? { token: gatewayToken(), password: gatewayPassword() } : undefined;
       const connectReq: RpcReq = {
         type: 'req',
@@ -138,39 +150,59 @@ async function callGateway<T>(method: string, params: Record<string, unknown> = 
         params: {
           minProtocol: 3,
           maxProtocol: 3,
-          client: { id: 'clawcommand', version: 'dev', platform: 'web', mode: 'ui', instanceId: randomId() },
+          client: {
+            id: 'gateway-client',
+            displayName: 'ClawCommand',
+            version: '1.0.0',
+            platform: 'web',
+            mode: 'ui',
+            instanceId: `cc-${randomId()}`,
+          },
           role: 'operator',
-          scopes: ['operator.read', 'operator.write', 'operator.admin'],
-          caps: [],
+          scopes: ['operator.admin'],
           ...(auth ? { auth } : {}),
         },
       };
       ws.send(JSON.stringify(connectReq));
     };
 
+    const timer = window.setTimeout(() => fail(`Gateway timeout calling ${method}.`), 10_000);
+
+    ws.onopen = () => sendConnect();
+
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(String(event.data)) as RpcRes;
+        const msg = JSON.parse(String(event.data)) as RpcRes | RpcEvent;
+
+        if (msg.type === 'event' && msg.event === 'connect.challenge') {
+          sendConnect();
+          return;
+        }
+
         if (msg.type !== 'res') return;
 
-        if (!settled && msg.id !== reqId) {
-          // connect response or unrelated response, ignore
-          if (msg.ok === false && method !== 'connect' && msg.error?.message?.toLowerCase().includes('auth')) {
+        if (!msg.ok) {
+          if (!handshakeReady) {
             clearTimeout(timer);
-            fail(`Gateway auth failed. Set VITE_OPENCLAW_GATEWAY_TOKEN or VITE_OPENCLAW_GATEWAY_PASSWORD.`, false);
+            fail(`Gateway connect failed: ${msg.error?.message || 'unknown error'}`, false);
+            return;
           }
-          if (msg.id !== reqId && msg.ok && (msg.payload as { protocol?: number } | undefined)?.protocol !== undefined) {
-            const req: RpcReq = { type: 'req', id: reqId, method, params };
-            ws.send(JSON.stringify(req));
+          if (msg.id === reqId) {
+            clearTimeout(timer);
+            fail(msg.error?.message ? `Gateway ${method} failed: ${msg.error.message}` : `Gateway ${method} failed.`);
           }
           return;
         }
 
-        clearTimeout(timer);
-        if (!msg.ok) {
-          fail(msg.error?.message ? `Gateway ${method} failed: ${msg.error.message}` : `Gateway ${method} failed.`);
+        if (!handshakeReady) {
+          handshakeReady = true;
+          const req: RpcReq = { type: 'req', id: reqId, method, params };
+          ws.send(JSON.stringify(req));
           return;
         }
+
+        if (msg.id !== reqId) return;
+        clearTimeout(timer);
         done(msg.payload);
       } catch (error) {
         clearTimeout(timer);
@@ -190,92 +222,54 @@ async function callGateway<T>(method: string, params: Record<string, unknown> = 
   });
 }
 
-function toAgentStatus(input: string | undefined): Agent['status'] {
-  const v = (input || '').toLowerCase();
-  if (v.includes('error')) return 'error';
-  if (v.includes('offline')) return 'offline';
-  if (v.includes('working') || v.includes('running')) return 'working';
-  if (v.includes('think')) return 'thinking';
-  if (v.includes('idle')) return 'idle';
-  return 'online';
-}
-
-function mapAgent(raw: any, index: number): Agent {
-  const id = raw?.id || `agent-${index}`;
-  const name = raw?.name || raw?.identity?.name || id;
-  return {
-    id,
-    name,
-    emoji: raw?.identity?.emoji || '🤖',
-    role: raw?.identity?.theme || 'Agent',
-    description: raw?.identity?.theme || 'OpenClaw agent',
-    status: toAgentStatus(raw?.status),
-    model: { provider: 'openai-codex', model: 'gpt-5.3-codex', temperature: 0.2, maxTokens: 4096 },
-    tools: { allow: [], deny: [] },
-    skills: raw?.skills || [],
-    workspace: raw?.workspace || '',
-    bootstrapFiles: { agents: '', soul: '', tools: '', memory: '' },
-    position: { x: 120 + (index % 4) * 220, y: 140 + Math.floor(index / 4) * 180 },
-    connections: [],
-    metrics: { messagesToday: 0, tokensUsed: 0, lastActive: new Date().toISOString() },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function mapSession(raw: any): Session {
-  return {
-    id: raw?.sessionId || raw?.key || randomId(),
-    key: raw?.key || '',
-    agentId: raw?.key?.split(':')[1] || 'main',
-    agentName: raw?.agentName || raw?.displayName || raw?.key?.split(':')[1] || 'main',
-    agentEmoji: '💬',
-    status: 'active',
-    messageCount: raw?.totalTurns || raw?.messageCount || 0,
-    createdAt: new Date(raw?.createdAt || Date.now()).toISOString(),
-    lastActivity: new Date(raw?.updatedAt || Date.now()).toISOString(),
-    messages: [],
-  };
-}
-
 export async function fetchAgents(): Promise<ApiResult<Agent[]>> {
-  const res = await callGateway<{ agents?: any[] }>('agents.list');
+  const spec = gatewayMethodMatrix.agents.list;
+  const res = await callGateway<unknown>(spec.method, spec.params);
   if (!res.ok) return res;
-  return { ok: true, data: (res.data.agents || []).map(mapAgent), status: 200 };
+  const parsed = contracts.agentsList.safeParse(res.data);
+  if (!parsed.success) return getError(`agents.list schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
+  return { ok: true, data: parsed.data.agents.map(mapAgent), status: 200 };
 }
 
 export async function fetchSessions(): Promise<ApiResult<Session[]>> {
-  const res = await callGateway<{ sessions?: any[] }>('sessions.list', { includeUnknown: true, limit: 120 });
+  const spec = gatewayMethodMatrix.sessions.list;
+  const res = await callGateway<unknown>(spec.method, spec.params);
   if (!res.ok) return res;
-  return { ok: true, data: (res.data.sessions || []).map(mapSession), status: 200 };
+  const parsed = contracts.sessionsList.safeParse(res.data);
+  if (!parsed.success) return getError(`sessions.list schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
+  return { ok: true, data: parsed.data.sessions.map(mapSession), status: 200 };
 }
 
 export async function sendMessage(sessionId: string, request: SendMessageRequest): Promise<ApiResult<SendMessageResponse>> {
   const idempotencyKey = randomId();
-  const sendRes = await callGateway<any>('chat.send', { sessionKey: sessionId, message: request.content, deliver: false, idempotencyKey });
+  const spec = gatewayMethodMatrix.chat.send;
+  const sendRes = await callGateway<unknown>(spec.method, spec.params(sessionId, request.content, idempotencyKey));
   if (!sendRes.ok) return sendRes;
+  const parsed = contracts.chatSend.safeParse(sendRes.data);
+  if (!parsed.success) return getError(`chat.send schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
 
   const userMessage: Message = { id: idempotencyKey, role: 'user', content: request.content, timestamp: new Date().toISOString() };
   return { ok: true, status: 200, data: { userMessage, sessionId, streaming: true } };
 }
 
 export async function fetchSessionMessages(sessionKey: string): Promise<ApiResult<Message[]>> {
-  const history = await callGateway<{ messages?: any[] }>('chat.history', { sessionKey, limit: 200 });
+  const spec = gatewayMethodMatrix.chat.history;
+  const history = await callGateway<unknown>(spec.method, spec.params(sessionKey));
   if (!history.ok) return history;
-  const messages: Message[] = (history.data.messages || []).map((m: any, idx: number) => {
-    const text = Array.isArray(m?.content)
-      ? m.content.filter((c: any) => c?.type === 'text' && typeof c.text === 'string').map((c: any) => c.text).join('\n')
-      : (m?.text || '');
-    return { id: m?.id || `${idx}`, role: m?.role === 'assistant' ? 'assistant' : m?.role === 'system' ? 'system' : 'user', content: text, timestamp: new Date(m?.timestamp || Date.now()).toISOString() };
-  });
-  return { ok: true, status: 200, data: messages };
+  const parsed = contracts.chatHistory.safeParse(history.data);
+  if (!parsed.success) return getError(`chat.history schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
+  return { ok: true, status: 200, data: parsed.data.messages.map((m, idx) => mapHistoryMessage(m, idx)) };
 }
 
 export async function fetchModelConfig(): Promise<ApiResult<ModelConfig>> {
-  const res = await callGateway<{ models?: Array<{ id: string; provider?: string }> }>('models.list');
+  const spec = gatewayMethodMatrix.models.list;
+  const res = await callGateway<unknown>(spec.method, spec.params);
   if (!res.ok) return res;
+  const parsed = contracts.modelsList.safeParse(res.data);
+  if (!parsed.success) return getError(`models.list schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
+
   const grouped = new Map<string, string[]>();
-  for (const model of res.data.models || []) {
+  for (const model of parsed.data.models) {
     const provider = model.provider || 'default';
     grouped.set(provider, [...(grouped.get(provider) || []), model.id]);
   }
@@ -283,47 +277,75 @@ export async function fetchModelConfig(): Promise<ApiResult<ModelConfig>> {
   return { ok: true, status: 200, data: { providers } };
 }
 
-export async function fetchMemoryIndex(): Promise<ApiResult<MemoryIndex>> {
-  const res = await callGateway<{ workspace?: string; files?: any[] }>('agents.files.list', { agentId: 'main' });
+export async function fetchMemoryIndex(agentId = 'main'): Promise<ApiResult<MemoryIndex>> {
+  const spec = gatewayMethodMatrix.files.list;
+  const res = await callGateway<unknown>(spec.method, spec.params(agentId));
   if (!res.ok) return res;
-  const files: MemoryFileEntry[] = (res.data.files || []).map((f: any) => ({
+  const parsed = contracts.memoryList.safeParse(res.data);
+  if (!parsed.success) return getError(`agents.files.list schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
+
+  const files: MemoryFileEntry[] = parsed.data.files.map((f) => ({
     path: f.path,
-    name: f.name,
+    name: f.name || f.path.split('/').pop() || f.path,
     size: f.size || 0,
     modifiedAt: new Date(f.updatedAtMs || Date.now()).toISOString(),
     isDirectory: Boolean(f.isDirectory),
+    agentId,
   }));
-  return { ok: true, status: 200, data: { files, root: res.data.workspace || '' } };
+
+  return { ok: true, status: 200, data: { files, root: parsed.data.workspace || '', agentId } };
 }
 
-export async function fetchMemoryFile(filePath: string): Promise<ApiResult<MemoryFileContent>> {
+export async function fetchMemoryFile(filePath: string, agentId = 'main'): Promise<ApiResult<MemoryFileContent>> {
+  const spec = gatewayMethodMatrix.files.get;
   const name = filePath.split('/').pop() || filePath;
-  const res = await callGateway<{ file?: any }>('agents.files.get', { agentId: 'main', name });
+  const res = await callGateway<unknown>(spec.method, spec.params(agentId, name));
   if (!res.ok) return res;
+  const parsed = contracts.memoryGet.safeParse(res.data);
+  if (!parsed.success) return getError(`agents.files.get schema mismatch: ${parsed.error.issues[0]?.message || 'invalid payload'}`, false);
   return {
     ok: true,
     status: 200,
     data: {
-      path: res.data.file?.path || filePath,
-      content: res.data.file?.content || '',
-      size: res.data.file?.size || 0,
-      modifiedAt: new Date(res.data.file?.updatedAtMs || Date.now()).toISOString(),
+      path: parsed.data.file?.path || filePath,
+      content: parsed.data.file?.content || '',
+      size: parsed.data.file?.size || 0,
+      modifiedAt: new Date(parsed.data.file?.updatedAtMs || Date.now()).toISOString(),
+      agentId,
     },
   };
 }
 
 export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
-  const [agents, sessions, health] = await Promise.all([fetchAgents(), fetchSessions(), callGateway<any>('health')]);
+  const [agents, sessions, health, subagents] = await Promise.all([
+    fetchAgents(),
+    fetchSessions(),
+    callGateway<unknown>(gatewayMethodMatrix.health.check.method),
+    callGateway<unknown>(gatewayMethodMatrix.subagents.list.method).catch(() => getError('subagents.list unavailable')),
+  ]);
   if (!agents.ok) return agents;
   if (!sessions.ok) return sessions;
-  const healthState: RuntimeStatus['health'] = health.ok && health.data?.ok ? 'healthy' : 'degraded';
+
+  const healthParsed = health.ok ? contracts.health.safeParse(health.data) : null;
+  const subagentRows = subagents.ok && subagents.data && Array.isArray((subagents.data as { entries?: unknown[] }).entries)
+    ? ((subagents.data as { entries: Array<{ id?: string; status?: string; task?: string; startedAt?: string; updatedAt?: string; parentSessionId?: string }> }).entries)
+    : [];
+
+  const healthState: RuntimeStatus['health'] = health.ok && healthParsed?.success && healthParsed.data.ok !== false ? 'healthy' : 'degraded';
   return {
     ok: true,
     status: 200,
     data: {
       agents: agents.data,
       sessions: sessions.data,
-      subagents: [],
+      subagents: subagentRows.map((s, idx) => ({
+        id: s.id || `subagent-${idx}`,
+        parentSessionId: s.parentSessionId || '',
+        status: (s.status as SubagentStatus['status']) || 'active',
+        task: s.task,
+        startedAt: new Date(s.startedAt || Date.now()).toISOString(),
+        lastActivity: s.updatedAt ? new Date(s.updatedAt).toISOString() : undefined,
+      })),
       health: healthState,
       adapterHealth: healthState === 'healthy' ? 'ok' : 'degraded',
       lastSyncAt: new Date().toISOString(),
@@ -332,18 +354,13 @@ export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
 }
 
 export async function postRuntimeAction(request: ActionRequest): Promise<ApiResult<ActionReceipt>> {
-  const key = request.targetId;
-  let rpcMethod = 'sessions.reset';
-  let rpcParams: Record<string, unknown> = { key };
-  if (request.action === 'stop' || request.action === 'kill') {
-    rpcMethod = 'chat.abort';
-    rpcParams = { sessionKey: key };
-  }
-  const result = await callGateway<any>(rpcMethod, rpcParams);
+  const matrix = request.targetType === 'agent' ? agentActionMatrix : sessionActionMatrix;
+  const spec = matrix[request.action];
+  const result = await callGateway<unknown>(spec.method, spec.buildParams(request.targetId));
   if (!result.ok) {
     return { ok: true, status: 200, data: { id: randomId(), commandId: randomId(), status: 'failed', error: result.error, timestamp: new Date().toISOString() } };
   }
-  return { ok: true, status: 200, data: { id: randomId(), commandId: randomId(), status: 'success', result: `${rpcMethod} dispatched`, timestamp: new Date().toISOString() } };
+  return { ok: true, status: 200, data: { id: randomId(), commandId: randomId(), status: 'success', result: `${spec.method} dispatched`, timestamp: new Date().toISOString() } };
 }
 
 const STORAGE_WRITE_KEYS = {
@@ -367,4 +384,74 @@ export function startRuntimePolling(intervalMs = 15_000): () => void {
   void poll();
   const id = window.setInterval(poll, intervalMs);
   return () => { active = false; clearInterval(id); };
+}
+
+export function subscribeRuntimeUpdates(onUpdate: (update: RuntimeLiveUpdate) => void, onState?: (state: 'connected' | 'polling-fallback' | 'closed') => void): () => void {
+  const url = gatewayUrl();
+  const ws = new WebSocket(url);
+  let fallbackStop: (() => void) | null = null;
+
+  const startFallback = () => {
+    if (fallbackStop) return;
+    onState?.('polling-fallback');
+    fallbackStop = startRuntimePolling(8_000);
+  };
+
+  const sendConnect = () => {
+    ws.send(JSON.stringify({
+      type: 'req',
+      id: randomId(),
+      method: 'connect',
+      params: {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: { id: 'gateway-client', displayName: 'ClawCommand', version: '1.0.0', platform: 'web', mode: 'ui', instanceId: `cc-${randomId()}` },
+        role: 'operator',
+        scopes: ['operator.admin'],
+        auth: gatewayToken() ? { token: gatewayToken() } : undefined,
+      },
+    }));
+  };
+
+  ws.onopen = () => sendConnect();
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(String(event.data)) as RpcRes | RpcEvent;
+
+    if (msg.type === 'event' && msg.event === 'connect.challenge') {
+      sendConnect();
+      return;
+    }
+
+    if (msg.type === 'res' && msg.ok) {
+      onState?.('connected');
+      return;
+    }
+
+    if (msg.type !== 'event') return;
+
+    const map: Record<string, RuntimeLiveUpdate['kind']> = {
+      tick: 'tick',
+      'chat.message': 'chat',
+      'agent.status': 'agent_status',
+      'subagents.update': 'subagents',
+    };
+
+    onUpdate({
+      kind: map[msg.event] || 'unknown',
+      payload: msg.payload,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  ws.onerror = () => startFallback();
+  ws.onclose = () => {
+    startFallback();
+    onState?.('closed');
+  };
+
+  return () => {
+    fallbackStop?.();
+    try { ws.close(); } catch {}
+  };
 }

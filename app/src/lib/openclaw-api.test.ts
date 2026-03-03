@@ -9,6 +9,7 @@ class FakeWebSocket {
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
   readyState = 1;
+  private challengeIssued = false;
 
   constructor(_url: string) {
     setTimeout(() => this.onopen?.(), 0);
@@ -18,6 +19,10 @@ class FakeWebSocket {
     const req = JSON.parse(payload);
     FakeWebSocket.sentMethods.push(req.method);
     if (req.method === 'connect') {
+      if (!this.challengeIssued) {
+        this.challengeIssued = true;
+        this.onmessage?.({ data: JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { nonce: 'n-1' } }) });
+      }
       this.onmessage?.({ data: JSON.stringify({ type: 'res', id: req.id, ok: true, payload: { protocol: 3 } }) });
       return;
     }
@@ -39,9 +44,11 @@ describe('openclaw api client gateway contracts', () => {
       'agents.files.list': { workspace: '/tmp', files: [{ path: '/tmp/MEMORY.md', name: 'MEMORY.md', size: 4, updatedAtMs: Date.now() }] },
       'agents.files.get': { file: { path: '/tmp/MEMORY.md', content: 'memo', size: 4, updatedAtMs: Date.now() } },
       health: { ok: true },
+      'subagents.list': { entries: [{ id: 'sa-1', status: 'active', task: 'test' }] },
       'chat.history': { messages: [{ id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'hi' }] }] },
       'chat.send': { accepted: true },
       'sessions.reset': { ok: true },
+      'chat.abort': { ok: true },
     };
     FakeWebSocket.sentMethods = [];
     vi.stubGlobal('WebSocket', FakeWebSocket as any);
@@ -68,10 +75,12 @@ describe('openclaw api client gateway contracts', () => {
     const runtime = await fetchRuntimeStatus();
     const send = await sendMessage('agent:main:telegram:group:1', { content: 'hello' });
     const action = await postRuntimeAction({ targetType: 'session', targetId: 's1', action: 'retry' });
+    const killAction = await postRuntimeAction({ targetType: 'session', targetId: 's1', action: 'kill' });
 
     expect(runtime.ok).toBe(true);
     expect(send.ok).toBe(true);
     expect(action.ok).toBe(true);
+    expect(killAction.ok).toBe(true);
 
     vi.useFakeTimers();
     const stop = startRuntimePolling(1000);
@@ -83,5 +92,14 @@ describe('openclaw api client gateway contracts', () => {
     expect(FakeWebSocket.sentMethods).toContain('agents.list');
     expect(FakeWebSocket.sentMethods).toContain('sessions.list');
     expect(FakeWebSocket.sentMethods).toContain('chat.send');
+  });
+
+  it('fails fast on schema mismatches', async () => {
+    FakeWebSocket.responses['agents.list'] = { agents: [{ id: 123 }] };
+    const agents = await fetchAgents();
+    expect(agents.ok).toBe(false);
+    if (!agents.ok) {
+      expect(agents.error).toContain('schema mismatch');
+    }
   });
 });

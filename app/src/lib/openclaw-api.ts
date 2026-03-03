@@ -89,6 +89,22 @@ function randomId() {
 }
 
 async function callGateway<T>(method: string, params: Record<string, unknown> = {}): Promise<ApiResult<T>> {
+  try {
+    const bridge = await fetch('/ocapi/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method, params }),
+    });
+
+    if (bridge.ok) {
+      const payload = await bridge.json() as { ok: boolean; data?: T; error?: string };
+      if (payload.ok) return { ok: true, data: payload.data as T, status: 200 };
+      return { ok: false, error: payload.error || `Bridge ${method} failed.`, status: bridge.status, retryable: false };
+    }
+  } catch {
+    // fallback to direct websocket mode below
+  }
+
   const url = gatewayUrl();
   if (!url) return { ok: false, error: 'Missing VITE_OPENCLAW_GATEWAY_URL.', status: null, retryable: false };
 

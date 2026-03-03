@@ -21,6 +21,7 @@ const AgentChatPage = lazy(() => import('@/pages/AgentChatPage').then((m) => ({ 
 const AgentSwarmPage = lazy(() => import('@/pages/AgentSwarmPage').then((m) => ({ default: m.AgentSwarmPage })));
 const VoicePage = lazy(() => import('@/pages/VoicePage').then((m) => ({ default: m.VoicePage })));
 const QMDPage = lazy(() => import('@/pages/QMDPage').then((m) => ({ default: m.QMDPage })));
+const MemoryPage = lazy(() => import('@/pages/MemoryPage').then((m) => ({ default: m.MemoryPage })));
 const MissionControlDemoPage = lazy(() => import('@/pages/MissionControlDemoPage').then((m) => ({ default: m.MissionControlDemoPage })));
 const WorkflowPage = lazy(() => import('@/pages/WorkflowPage'));
 const RoutingPage = lazy(() => import('@/pages/RoutingPage'));
@@ -47,16 +48,6 @@ function WorkspacePage() {
       title="Workspace"
       icon={null}
       description="File browser and editor for AGENTS.md, SOUL.md, TOOLS.md, and other configuration files."
-    />
-  );
-}
-
-function MemoryPage() {
-  return (
-    <PlaceholderPage
-      title="Memory Explorer"
-      icon={null}
-      description="Search and manage agent memories and context."
     />
   );
 }

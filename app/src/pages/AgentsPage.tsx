@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { StatusIndicator } from '@/components/factory-floor/StatusIndicator';
 import { getAgentsFeed, getDiagnostics, getInteractionStats, readDecisionLog, readOperatorAudit, reconcileOperatorLedgers, runOperatorAction } from '@/lib/runtime-adapters';
+import { fetchAgents, fetchSessions, startRuntimePolling } from '@/lib/openclaw-api';
 import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
 import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
 import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
@@ -35,6 +36,8 @@ export function AgentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(agentsFeed.data[0] ?? null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [lastActivity, setLastActivity] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<{ id: string; action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate' } | null>(null);
   const [auditLog, setAuditLog] = useState(readOperatorAudit());
   const [decisions, setDecisions] = useState(readDecisionLog());
@@ -49,6 +52,27 @@ export function AgentsPage() {
       setAuditLog(audit);
       setDecisions(syncedDecisions);
     });
+
+    const stopPolling = startRuntimePolling(10_000);
+    const tick = window.setInterval(async () => {
+      const [agentsResult, sessionsResult] = await Promise.all([fetchAgents(), fetchSessions()]);
+      if (agentsResult.ok) {
+        setAgents(agentsResult.data);
+      }
+      if (sessionsResult.ok) {
+        setSessionCount(sessionsResult.data.length);
+        const latest = sessionsResult.data
+          .map((session) => session.lastActivity)
+          .sort()
+          .at(-1);
+        setLastActivity(latest ?? null);
+      }
+    }, 10_000);
+
+    return () => {
+      stopPolling();
+      clearInterval(tick);
+    };
   }, []);
 
   const filteredAgents = agents.filter((agent) =>
@@ -124,7 +148,7 @@ export function AgentsPage() {
 
       <div className="px-6 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Interactions</p><p className="text-lg text-cyan-300 font-semibold">{interactionFeed.data.totalMessages}</p></div>
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Active sessions</p><p className="text-lg text-cyan-300 font-semibold">{interactionFeed.data.activeSessions}</p></div>
+        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Active sessions</p><p className="text-lg text-cyan-300 font-semibold">{sessionCount || interactionFeed.data.activeSessions}</p><p className="text-[10px] text-slate-500">Last activity: {lastActivity ? new Date(lastActivity).toLocaleTimeString() : 'n/a'}</p></div>
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Errors (1h)</p><p className="text-lg text-red-300 font-semibold">{interactionFeed.data.errorsLastHour}</p></div>
         <HealthConnectionPanel feed={agentsFeed} diagnosticsFeed={diagnosticsFeed} title="Health + Connection" />
       </div>

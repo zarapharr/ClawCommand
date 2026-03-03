@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Network, Play, Pause, RefreshCw } from 'lucide-react';
+import { Network, Play, Pause, RefreshCw, Siren, Skull } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { fetchRuntimeStatus, postRuntimeAction, type ActionReceipt } from '@/lib/openclaw-api';
+import { fetchRuntimeStatus, postRuntimeAction, subscribeRuntimeUpdates, type ActionReceipt } from '@/lib/openclaw-api';
 
 export function AgentSwarmPage() {
-  const [sessions, setSessions] = useState<Array<{ id: string; status: string; agentName: string }>>([]);
+  const [sessions, setSessions] = useState<Array<{ id: string; key: string; status: string; agentName: string }>>([]);
   const [receipts, setReceipts] = useState<ActionReceipt[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [liveState, setLiveState] = useState<'connected' | 'polling-fallback' | 'closed'>('closed');
 
   const load = async () => {
     const result = await fetchRuntimeStatus();
@@ -16,15 +17,21 @@ export function AgentSwarmPage() {
       return;
     }
 
-    setSessions(result.data.sessions.map((session) => ({ id: session.id, status: session.status, agentName: session.agentName })));
+    setSessions(result.data.sessions.map((session) => ({ id: session.id, key: session.key, status: session.status, agentName: session.agentName })));
     setError(null);
   };
 
   useEffect(() => {
     void load();
+    const unsubscribe = subscribeRuntimeUpdates((update) => {
+      if (update.kind === 'tick' || update.kind === 'subagents') {
+        void load();
+      }
+    }, setLiveState);
+    return unsubscribe;
   }, []);
 
-  const runAction = async (sessionId: string, action: 'start' | 'stop' | 'retry' | 'kill') => {
+  const runAction = async (sessionId: string, action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate') => {
     const result = await postRuntimeAction({ targetType: 'session', targetId: sessionId, action });
     if (!result.ok) {
       setError(result.error);
@@ -44,7 +51,7 @@ export function AgentSwarmPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white"><span className="text-purple-400">Agent</span> Swarm</h1>
-            <p className="text-xs text-slate-400">Runtime command actions with receipts</p>
+            <p className="text-xs text-slate-400">Action matrix wired to runtime operations ({liveState})</p>
           </div>
         </div>
         <Button variant="outline" className="border-slate-700 text-slate-300" onClick={() => void load()}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
@@ -61,14 +68,16 @@ export function AgentSwarmPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-white text-sm">{session.agentName}</p>
-                    <p className="text-xs text-slate-500">{session.id}</p>
+                    <p className="text-xs text-slate-500">{session.key || session.id}</p>
                   </div>
                   <Badge variant="outline" className="border-slate-700 text-slate-300">{session.status}</Badge>
                 </div>
-                <div className="flex gap-2 mt-2">
-                  <Button size="sm" variant="outline" className="border-emerald-500/30 text-emerald-400" onClick={() => void runAction(session.id, 'start')}><Play className="w-3 h-3 mr-1" />Start</Button>
-                  <Button size="sm" variant="outline" className="border-orange-500/30 text-orange-400" onClick={() => void runAction(session.id, 'stop')}><Pause className="w-3 h-3 mr-1" />Stop</Button>
-                  <Button size="sm" variant="outline" className="border-cyan-500/30 text-cyan-400" onClick={() => void runAction(session.id, 'retry')}>Retry</Button>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <Button size="sm" variant="outline" className="border-emerald-500/30 text-emerald-400" onClick={() => void runAction(session.key || session.id, 'start')}><Play className="w-3 h-3 mr-1" />Start</Button>
+                  <Button size="sm" variant="outline" className="border-orange-500/30 text-orange-400" onClick={() => void runAction(session.key || session.id, 'stop')}><Pause className="w-3 h-3 mr-1" />Stop</Button>
+                  <Button size="sm" variant="outline" className="border-cyan-500/30 text-cyan-400" onClick={() => void runAction(session.key || session.id, 'retry')}>Retry</Button>
+                  <Button size="sm" variant="outline" className="border-red-600/30 text-red-400" onClick={() => void runAction(session.key || session.id, 'kill')}><Skull className="w-3 h-3 mr-1" />Kill</Button>
+                  <Button size="sm" variant="outline" className="border-amber-500/30 text-amber-300" onClick={() => void runAction(session.key || session.id, 'escalate')}><Siren className="w-3 h-3 mr-1" />Escalate</Button>
                 </div>
               </div>
             ))}

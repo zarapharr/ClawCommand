@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MessageSquare, Send, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { fetchSessionMessages, fetchSessions, sendMessage } from '@/lib/openclaw-api';
+import { fetchSessionMessages, fetchSessions, sendMessage, subscribeRuntimeUpdates } from '@/lib/openclaw-api';
 import type { Session } from '@/types';
 
 export function AgentChatPage() {
@@ -12,6 +12,7 @@ export function AgentChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [liveState, setLiveState] = useState<'connected' | 'polling-fallback' | 'closed'>('closed');
 
   const loadSessions = async () => {
     const result = await fetchSessions();
@@ -26,6 +27,12 @@ export function AgentChatPage() {
 
   useEffect(() => {
     void loadSessions();
+    const unsubscribe = subscribeRuntimeUpdates((update) => {
+      if (update.kind === 'chat' || update.kind === 'tick') {
+        void loadSessions();
+      }
+    }, setLiveState);
+    return unsubscribe;
   }, []);
 
   const activeSession = useMemo(() => sessions.find((session) => session.id === activeSessionId), [sessions, activeSessionId]);
@@ -47,7 +54,18 @@ export function AgentChatPage() {
     if (!activeSessionId || !inputValue.trim()) return;
     setSending(true);
     const sessionKey = activeSession?.key || activeSessionId;
-    const result = await sendMessage(sessionKey, { content: inputValue });
+    const outgoing = inputValue;
+
+    setMessages((prev) => ({
+      ...prev,
+      [activeSessionId]: [
+        ...(prev[activeSessionId] || []),
+        { id: `local-${Date.now()}`, role: 'user', content: outgoing, timestamp: new Date().toISOString() },
+      ],
+    }));
+
+    setInputValue('');
+    const result = await sendMessage(sessionKey, { content: outgoing });
     setSending(false);
 
     if (!result.ok) {
@@ -55,9 +73,10 @@ export function AgentChatPage() {
       return;
     }
 
-    setInputValue('');
     await loadSessions();
   };
+
+  const activeMessages = messages[activeSessionId] || activeSession?.messages || [];
 
   return (
     <div className="h-full flex flex-col">
@@ -68,7 +87,7 @@ export function AgentChatPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white"><span className="text-cyan-400">Agent</span> Chat</h1>
-            <p className="text-xs text-slate-400">Live session send and receive flow</p>
+            <p className="text-xs text-slate-400">History/send/update flow ({liveState})</p>
           </div>
         </div>
         <Button variant="outline" className="border-cyan-500/30 text-cyan-400" onClick={() => void loadSessions()}><Plus className="w-4 h-4 mr-2" />Refresh</Button>
@@ -86,13 +105,13 @@ export function AgentChatPage() {
 
         <div className="flex-1 flex flex-col">
           <div className="flex-1 p-6 overflow-auto space-y-3">
-            {(messages[activeSessionId] || activeSession?.messages || []).map((message) => (
+            {activeMessages.map((message) => (
               <div key={message.id} className={`rounded-lg border p-3 ${message.role === 'user' ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-slate-900/30 border-slate-800'}`}>
                 <p className="text-xs text-slate-400 mb-1">{message.role}</p>
                 <p className="text-sm text-slate-200 whitespace-pre-wrap">{message.content}</p>
               </div>
             ))}
-            {!(messages[activeSessionId] || activeSession?.messages || []).length && <p className="text-slate-500">No messages in this session yet.</p>}
+            {!activeMessages.length && <p className="text-slate-500">No messages in this session yet.</p>}
           </div>
 
           <div className="p-4 border-t border-slate-800/50 flex gap-2">

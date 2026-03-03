@@ -6,12 +6,13 @@ import { ConnectionLines } from '@/components/factory-floor/ConnectionLines';
 import { ActivityFeed } from '@/components/factory-floor/ActivityFeed';
 import { SystemGauges } from '@/components/factory-floor/SystemGauges';
 import { Button } from '@/components/ui/button';
-import { fetchRuntimeStatus, startRuntimePolling } from '@/lib/openclaw-api';
+import { fetchRuntimeStatus, startRuntimePolling, subscribeRuntimeUpdates } from '@/lib/openclaw-api';
 import { runtimeMetrics } from '@/lib/openclaw-mappers';
 import type { AgentConnection, ActivityEvent, SystemMetrics } from '@/types';
 
 export function FactoryFloorPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [sessions, setSessions] = useState<Array<{ agentId: string; key: string; messageCount: number }>>([]);
   const [subagentActivities, setSubagentActivities] = useState<Array<{ id: string; task?: string; status: string; lastActivity?: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -23,6 +24,7 @@ export function FactoryFloorPage() {
       return;
     }
     setAgents(result.data.agents);
+    setSessions(result.data.sessions.map((item) => ({ agentId: item.agentId, key: item.key, messageCount: item.messageCount })));
     setSubagentActivities(result.data.subagents.map((item) => ({
       id: item.id,
       task: item.task,
@@ -35,15 +37,37 @@ export function FactoryFloorPage() {
   useEffect(() => {
     void load();
     const cleanup = startRuntimePolling(10_000);
-    const id = window.setInterval(() => void load(), 10_000);
+    const unsubscribe = subscribeRuntimeUpdates((update) => {
+      if (update.kind === 'tick' || update.kind === 'agent_status' || update.kind === 'subagents') {
+        void load();
+      }
+    });
     return () => {
       cleanup();
-      clearInterval(id);
+      unsubscribe();
     };
   }, []);
 
   const metrics = useMemo(() => runtimeMetrics({ agents, sessions: [], subagents: [], adapterHealth: 'ok', health: 'healthy', lastSyncAt: new Date().toISOString() }), [agents]);
-  const connections: AgentConnection[] = useMemo(() => agents.slice(1).map((agent, idx) => ({ from: agents[0]?.id || agent.id, to: agent.id, activity: idx % 2 ? 'low' : 'medium', messageCount: 0 })), [agents]);
+  const connections: AgentConnection[] = useMemo(() => {
+    const byAgent = new Map<string, number>();
+    for (const session of sessions) {
+      byAgent.set(session.agentId, (byAgent.get(session.agentId) || 0) + session.messageCount);
+    }
+    const main = agents[0]?.id;
+    return agents
+      .filter((agent) => agent.id !== main)
+      .map((agent) => {
+        const count = byAgent.get(agent.id) || 0;
+        return {
+          from: main || agent.id,
+          to: agent.id,
+          activity: count > 40 ? 'high' : count > 10 ? 'medium' : count > 0 ? 'low' : 'none',
+          messageCount: count,
+        };
+      });
+  }, [agents, sessions]);
+
   const systemMetrics: SystemMetrics = useMemo(() => ({ cpu: { usage: Math.min(95, 15 + metrics.workingAgents * 10) }, memory: { total: 100, used: Math.min(95, 20 + metrics.onlineAgents * 8), free: 100 - Math.min(95, 20 + metrics.onlineAgents * 8) }, disk: { total: 100, used: 48, free: 52 }, gateway: { status: error ? 'offline' : 'online', uptime: 0, connectedChannels: [] } }), [metrics, error]);
   const activities: ActivityEvent[] = useMemo(() => subagentActivities.map((item) => ({ id: item.id, agentId: item.id, agentName: item.id, agentEmoji: '⚙️', type: item.status === 'error' ? 'error' : 'status_change', message: item.task || item.status, timestamp: item.lastActivity || new Date().toISOString() })), [subagentActivities]);
 
@@ -56,7 +80,7 @@ export function FactoryFloorPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-white"><span className="text-cyan-400">Factory</span> Floor</h1>
-            <p className="text-xs text-slate-400">Live runtime, sessions, and subagent status</p>
+            <p className="text-xs text-slate-400">Runtime-native topology and relationship graph</p>
           </div>
         </div>
         <Button variant="outline" className="border-slate-700 text-slate-300" onClick={() => void load()}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>

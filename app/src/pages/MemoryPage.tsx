@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FileText, Folder, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { fetchMemoryFile, fetchMemoryIndex, type MemoryFileEntry } from '@/lib/openclaw-api';
+import { fetchAgents, fetchMemoryFile, fetchMemoryIndex, type MemoryFileEntry } from '@/lib/openclaw-api';
 
 export function MemoryPage() {
   const [files, setFiles] = useState<MemoryFileEntry[]>([]);
@@ -9,10 +9,12 @@ export function MemoryPage() {
   const [content, setContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [agentId, setAgentId] = useState('main');
+  const [agentOptions, setAgentOptions] = useState<string[]>(['main']);
 
-  const loadIndex = async () => {
+  const loadIndex = async (nextAgentId = agentId) => {
     setLoading(true);
-    const result = await fetchMemoryIndex();
+    const result = await fetchMemoryIndex(nextAgentId);
     setLoading(false);
     if (!result.ok) {
       setError(result.error);
@@ -27,14 +29,21 @@ export function MemoryPage() {
   };
 
   useEffect(() => {
-    void loadIndex();
+    void (async () => {
+      const agents = await fetchAgents();
+      if (agents.ok) {
+        const ids = agents.data.map((agent) => agent.id);
+        setAgentOptions(ids.length ? ids : ['main']);
+      }
+      await loadIndex(agentId);
+    })();
   }, []);
 
   useEffect(() => {
     if (!selectedPath) return;
 
     void (async () => {
-      const result = await fetchMemoryFile(selectedPath);
+      const result = await fetchMemoryFile(selectedPath, agentId);
       if (!result.ok) {
         setError(result.error);
         setContent('');
@@ -43,18 +52,25 @@ export function MemoryPage() {
       setContent(result.data.content);
       setError(null);
     })();
-  }, [selectedPath]);
+  }, [selectedPath, agentId]);
+
+  const scopeLabel = useMemo(() => `Scope: ${agentId} agent workspace • markdown files only • read-only`, [agentId]);
 
   return (
     <div className="h-full flex flex-col">
       <div className="px-6 py-4 border-b border-slate-800/50 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-white"><span className="text-cyan-400">Memory</span> Explorer</h1>
-          <p className="text-xs text-slate-400">Read-only memory and markdown files from runtime</p>
+          <p className="text-xs text-slate-400">{scopeLabel}</p>
         </div>
-        <Button variant="outline" className="border-slate-700 text-slate-300" onClick={() => void loadIndex()}>
-          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <select value={agentId} onChange={(e) => { setAgentId(e.target.value); setSelectedPath(null); void loadIndex(e.target.value); }} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200">
+            {agentOptions.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+          <Button variant="outline" className="border-slate-700 text-slate-300" onClick={() => void loadIndex()}>
+            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">

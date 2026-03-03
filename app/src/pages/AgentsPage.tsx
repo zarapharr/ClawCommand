@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { StatusIndicator } from '@/components/factory-floor/StatusIndicator';
 import { getAgentsFeed, getDiagnostics, getInteractionStats, readDecisionLog, readOperatorAudit, reconcileOperatorLedgers, runOperatorAction } from '@/lib/runtime-adapters';
-import { fetchAgents, fetchSessions, startRuntimePolling } from '@/lib/openclaw-api';
+import { fetchAgents, fetchSessions, postRuntimeAction, startRuntimePolling, subscribeRuntimeUpdates } from '@/lib/openclaw-api';
 import { useRuntimeFeed } from '@/hooks/use-runtime-feed';
 import { RuntimeStatusBar } from '@/components/runtime/RuntimeStatusBar';
 import { HealthConnectionPanel } from '@/components/runtime/HealthConnectionPanel';
@@ -68,10 +68,19 @@ export function AgentsPage() {
         setLastActivity(latest ?? null);
       }
     }, 10_000);
+    const unsubscribe = subscribeRuntimeUpdates((update) => {
+      if (update.kind === 'tick' || update.kind === 'agent_status') {
+        void reconcileOperatorLedgers().then(({ audit, decisions: syncedDecisions }) => {
+          setAuditLog(audit);
+          setDecisions(syncedDecisions);
+        });
+      }
+    });
 
     return () => {
       stopPolling();
       clearInterval(tick);
+      unsubscribe();
     };
   }, []);
 
@@ -98,6 +107,7 @@ export function AgentsPage() {
 
   const executeAction = async () => {
     if (!pendingAction) return;
+
     await runOperatorAction({
       action: pendingAction.action,
       source: agentsFeed.source,
@@ -106,17 +116,16 @@ export function AgentsPage() {
       payload: { reason: 'operator console action' },
     });
 
-    setAgents((prev) => prev.map((agent) => {
-      if (agent.id !== pendingAction.id) return agent;
-      const statusMap = {
-        start: 'working',
-        stop: 'idle',
-        retry: 'thinking',
-        kill: 'offline',
-        escalate: 'working',
-      } as const;
-      return { ...agent, status: statusMap[pendingAction.action], updatedAt: new Date().toISOString() };
-    }));
+    await postRuntimeAction({
+      action: pendingAction.action,
+      targetType: 'agent',
+      targetId: pendingAction.id,
+    });
+
+    const latestAgents = await fetchAgents();
+    if (latestAgents.ok) {
+      setAgents(latestAgents.data);
+    }
 
     setAuditLog(readOperatorAudit());
     setDecisions(readDecisionLog());

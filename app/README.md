@@ -64,14 +64,37 @@ npm run build
 Create a `.env` file in the root directory:
 
 ```env
-# OpenClaw Gateway
+# Required for live P0 integrations (Agents, Models, Memory, Chat, Factory Floor, Swarm)
+VITE_OPENCLAW_API_BASE=http://localhost:3001
+VITE_OPENCLAW_API_TOKEN=optional_bearer_token
+
+# Optional runtime action and ledger endpoints
+VITE_RUNTIME_ACTION_ENDPOINT=http://localhost:3001/api/runtime/actions
+VITE_RUNTIME_LEDGER_ENDPOINT=http://localhost:3001/api/runtime/ledger
+
+# Optional existing integrations
 VITE_OPENCLAW_GATEWAY_URL=http://localhost:8080
-
-# ElevenLabs (for Voice Hub)
 VITE_ELEVENLABS_API_KEY=your_api_key_here
-
-# Optional: Analytics
 VITE_ANALYTICS_ID=your_analytics_id
+```
+
+## Verification Commands (P0 Live Integration)
+
+Run these exactly from `app/`:
+
+```bash
+npm install
+npm test
+npm run build
+npm run dev
+```
+
+Optional API smoke checks (if runtime is available):
+
+```bash
+curl -H "Authorization: Bearer $VITE_OPENCLAW_API_TOKEN" "$VITE_OPENCLAW_API_BASE/api/agents"
+curl -H "Authorization: Bearer $VITE_OPENCLAW_API_TOKEN" "$VITE_OPENCLAW_API_BASE/api/models"
+curl -H "Authorization: Bearer $VITE_OPENCLAW_API_TOKEN" "$VITE_OPENCLAW_API_BASE/api/runtime/status"
 ```
 
 ## Environment + Session Detection

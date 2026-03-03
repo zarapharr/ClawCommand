@@ -97,7 +97,10 @@ export function mapAgent(raw: unknown, index: number): Agent {
     skills: parsed.skills || [],
     workspace: parsed.workspace || '',
     bootstrapFiles: { agents: '', soul: '', tools: '', memory: '' },
-    position: { x: 120 + (index % 4) * 220, y: 140 + Math.floor(index / 4) * 180 },
+    position: {
+      x: 20 + (index % 4) * 20,
+      y: 22 + Math.floor(index / 4) * 22,
+    },
     connections: [],
     metrics: { messagesToday: 0, tokensUsed: 0, lastActive: new Date().toISOString() },
     createdAt: new Date().toISOString(),

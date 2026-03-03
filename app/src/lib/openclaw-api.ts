@@ -92,6 +92,44 @@ export interface RuntimeLiveUpdate {
   timestamp: string;
 }
 
+const RUNTIME_STATUS_TTL_MS = 2_500;
+let runtimeStatusCache: { data: RuntimeStatus; expiresAt: number } | null = null;
+let runtimeStatusInFlight: Promise<ApiResult<RuntimeStatus>> | null = null;
+
+const healthStabilityState = {
+  stable: 'degraded' as RuntimeStatus['health'],
+  consecutiveSuccesses: 0,
+  consecutiveFailures: 0,
+};
+
+export function resetRuntimeHealthStabilityState() {
+  healthStabilityState.stable = 'degraded';
+  healthStabilityState.consecutiveSuccesses = 0;
+  healthStabilityState.consecutiveFailures = 0;
+}
+
+export function resolveHealthStateWithHysteresis(nextHealthy: boolean): RuntimeStatus['health'] {
+  if (nextHealthy) {
+    healthStabilityState.consecutiveSuccesses += 1;
+    healthStabilityState.consecutiveFailures = 0;
+    if (healthStabilityState.consecutiveSuccesses >= 2) {
+      healthStabilityState.stable = 'healthy';
+    }
+    return healthStabilityState.stable;
+  }
+
+  healthStabilityState.consecutiveFailures += 1;
+  healthStabilityState.consecutiveSuccesses = 0;
+
+  if (healthStabilityState.consecutiveFailures >= 4) {
+    healthStabilityState.stable = 'offline';
+  } else if (healthStabilityState.consecutiveFailures >= 2) {
+    healthStabilityState.stable = 'degraded';
+  }
+
+  return healthStabilityState.stable;
+}
+
 function randomId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -110,18 +148,22 @@ function unsupportedActionReceipt(method: string, request: ActionRequest): Actio
     id: randomId(),
     commandId: randomId(),
     status: 'failed',
-    error: `${request.targetType}.${request.action} blocked: gateway method \"${method}\" is unavailable on this OpenClaw instance. Workaround: use session-level controls (sessions.reset/chat.abort) or CLI actions directly.`,
+    error: `${request.targetType}.${request.action} blocked: gateway method "${method}" is unavailable on this OpenClaw instance. Workaround: use session-level controls (sessions.reset/chat.abort) or CLI actions directly.`,
     timestamp: new Date().toISOString(),
   };
 }
 
 async function callGateway<T>(method: string, params: Record<string, unknown> = {}): Promise<ApiResult<T>> {
   try {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8_000);
     const bridge = await fetch('/ocapi/call', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method, params }),
+      signal: controller.signal,
     });
+    window.clearTimeout(timer);
 
     if (bridge.ok) {
       const payload = await bridge.json() as { ok: boolean; data?: T; error?: string };
@@ -144,14 +186,14 @@ async function callGateway<T>(method: string, params: Record<string, unknown> = 
     const fail = (error: string, retryable = true) => {
       if (settled) return;
       settled = true;
-      try { ws.close(); } catch {}
+      try { ws.close(); } catch { /* noop */ }
       resolve({ ok: false, error, status: null, retryable });
     };
 
     const done = (payload: unknown) => {
       if (settled) return;
       settled = true;
-      try { ws.close(); } catch {}
+      try { ws.close(); } catch { /* noop */ }
       resolve({ ok: true, data: payload as T, status: 200 });
     };
 
@@ -331,27 +373,37 @@ export async function fetchMemoryFile(filePath: string, agentId = 'main'): Promi
 }
 
 export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
-  const [agents, sessions, health, subagents] = await Promise.all([
-    fetchAgents(),
-    fetchSessions(),
-    callGateway<unknown>(gatewayMethodMatrix.health.check.method),
-    methodSupported(gatewayMethodMatrix.subagents.list.method)
-      ? callGateway<unknown>(gatewayMethodMatrix.subagents.list.method).catch(() => getError('subagents.list unavailable'))
-      : Promise.resolve(getError('subagents.list unavailable', false)),
-  ]);
-  if (!agents.ok) return agents;
-  if (!sessions.ok) return sessions;
+  const now = Date.now();
+  if (runtimeStatusCache && runtimeStatusCache.expiresAt > now) {
+    return { ok: true, status: 200, data: runtimeStatusCache.data };
+  }
 
-  const healthParsed = health.ok ? contracts.health.safeParse(health.data) : null;
-  const subagentRows = subagents.ok && subagents.data && Array.isArray((subagents.data as { entries?: unknown[] }).entries)
-    ? ((subagents.data as { entries: Array<{ id?: string; status?: string; task?: string; startedAt?: string; updatedAt?: string; parentSessionId?: string }> }).entries)
-    : [];
+  if (runtimeStatusInFlight) {
+    return runtimeStatusInFlight;
+  }
 
-  const healthState: RuntimeStatus['health'] = health.ok && healthParsed?.success && healthParsed.data.ok !== false ? 'healthy' : 'degraded';
-  return {
-    ok: true,
-    status: 200,
-    data: {
+  runtimeStatusInFlight = (async () => {
+    const [agents, sessions, health, subagents] = await Promise.all([
+      fetchAgents(),
+      fetchSessions(),
+      callGateway<unknown>(gatewayMethodMatrix.health.check.method),
+      methodSupported(gatewayMethodMatrix.subagents.list.method)
+        ? callGateway<unknown>(gatewayMethodMatrix.subagents.list.method).catch(() => getError('subagents.list unavailable'))
+        : Promise.resolve(getError('subagents.list unavailable', false)),
+    ]);
+
+    if (!agents.ok) return agents;
+    if (!sessions.ok) return sessions;
+
+    const healthParsed = health.ok ? contracts.health.safeParse(health.data) : null;
+    const rawHealthy = Boolean(health.ok && healthParsed?.success && healthParsed.data.ok !== false);
+    const healthState = resolveHealthStateWithHysteresis(rawHealthy);
+
+    const subagentRows = subagents.ok && subagents.data && Array.isArray((subagents.data as { entries?: unknown[] }).entries)
+      ? ((subagents.data as { entries: Array<{ id?: string; status?: string; task?: string; startedAt?: string; updatedAt?: string; parentSessionId?: string }> }).entries)
+      : [];
+
+    const payload: RuntimeStatus = {
       agents: agents.data,
       sessions: sessions.data,
       subagents: subagentRows.map((s, idx) => ({
@@ -363,10 +415,19 @@ export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
         lastActivity: s.updatedAt ? new Date(s.updatedAt).toISOString() : undefined,
       })),
       health: healthState,
-      adapterHealth: healthState === 'healthy' ? 'ok' : 'degraded',
+      adapterHealth: healthState === 'healthy' ? 'ok' : healthState === 'offline' ? 'offline' : 'degraded',
       lastSyncAt: new Date().toISOString(),
-    },
-  };
+    };
+
+    runtimeStatusCache = { data: payload, expiresAt: Date.now() + RUNTIME_STATUS_TTL_MS };
+    return { ok: true, status: 200, data: payload };
+  })();
+
+  try {
+    return await runtimeStatusInFlight;
+  } finally {
+    runtimeStatusInFlight = null;
+  }
 }
 
 export async function postRuntimeAction(request: ActionRequest): Promise<ApiResult<ActionReceipt>> {
@@ -411,9 +472,10 @@ export function subscribeRuntimeUpdates(onUpdate: (update: RuntimeLiveUpdate) =>
   const url = gatewayUrl();
   const ws = new WebSocket(url);
   let fallbackStop: (() => void) | null = null;
+  let closedByClient = false;
 
   const startFallback = () => {
-    if (fallbackStop) return;
+    if (fallbackStop || closedByClient) return;
     onState?.('polling-fallback');
     fallbackStop = startRuntimePolling(8_000);
   };
@@ -470,11 +532,16 @@ export function subscribeRuntimeUpdates(onUpdate: (update: RuntimeLiveUpdate) =>
   };
 
   ws.onerror = () => startFallback();
-  ws.onclose = () => startFallback();
+  ws.onclose = () => {
+    if (!closedByClient) {
+      startFallback();
+    }
+  };
 
   return () => {
+    closedByClient = true;
     fallbackStop?.();
     onState?.('closed');
-    try { ws.close(); } catch {}
+    try { ws.close(); } catch { /* noop */ }
   };
 }

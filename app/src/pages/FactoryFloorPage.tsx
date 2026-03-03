@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Factory, Users, Zap, RefreshCw } from 'lucide-react';
 import type { Agent } from '@/types';
 import { AgentStation } from '@/components/factory-floor/AgentStation';
@@ -6,7 +6,7 @@ import { ConnectionLines } from '@/components/factory-floor/ConnectionLines';
 import { ActivityFeed } from '@/components/factory-floor/ActivityFeed';
 import { SystemGauges } from '@/components/factory-floor/SystemGauges';
 import { Button } from '@/components/ui/button';
-import { fetchRuntimeStatus, startRuntimePolling, subscribeRuntimeUpdates } from '@/lib/openclaw-api';
+import { fetchRuntimeStatus, subscribeRuntimeUpdates } from '@/lib/openclaw-api';
 import { runtimeMetrics } from '@/lib/openclaw-mappers';
 import type { AgentConnection, ActivityEvent, SystemMetrics } from '@/types';
 
@@ -17,35 +17,49 @@ export function FactoryFloorPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [runtimeHealth, setRuntimeHealth] = useState<'healthy' | 'degraded' | 'offline'>('offline');
+  const [loading, setLoading] = useState(true);
+  const requestRef = useRef(0);
 
   const load = async () => {
-    const result = await fetchRuntimeStatus();
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    const requestId = ++requestRef.current;
+    setLoading(true);
+    try {
+      const result = await fetchRuntimeStatus();
+      if (requestId !== requestRef.current) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setAgents(result.data.agents);
+      setSessions(result.data.sessions.map((item) => ({ agentId: item.agentId, key: item.key, messageCount: item.messageCount })));
+      setSubagentActivities(result.data.subagents.map((item) => ({
+        id: item.id,
+        task: item.task,
+        status: item.status,
+        lastActivity: item.lastActivity,
+      })));
+      setRuntimeHealth(result.data.health);
+      setSelectedAgent((current) => result.data.agents.find((agent) => agent.id === current?.id) ?? result.data.agents[0] ?? null);
+      setError(null);
+    } catch (err) {
+      if (requestId !== requestRef.current) return;
+      setError(err instanceof Error ? err.message : 'Runtime load failed');
+    } finally {
+      if (requestId === requestRef.current) {
+        setLoading(false);
+      }
     }
-    setAgents(result.data.agents);
-    setSessions(result.data.sessions.map((item) => ({ agentId: item.agentId, key: item.key, messageCount: item.messageCount })));
-    setSubagentActivities(result.data.subagents.map((item) => ({
-      id: item.id,
-      task: item.task,
-      status: item.status,
-      lastActivity: item.lastActivity,
-    })));
-    setRuntimeHealth(result.data.health);
-    setError(null);
   };
 
   useEffect(() => {
     void load();
-    const cleanup = startRuntimePolling(10_000);
     const unsubscribe = subscribeRuntimeUpdates((update) => {
       if (update.kind === 'tick' || update.kind === 'agent_status' || update.kind === 'subagents') {
         void load();
       }
     });
     return () => {
-      cleanup();
+      requestRef.current += 1;
       unsubscribe();
     };
   }, []);
@@ -116,10 +130,18 @@ export function FactoryFloorPage() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative p-6">
           <div className="relative w-full h-full rounded-2xl border overflow-hidden tron-grid bg-slate-900/30 border-slate-800/50">
-            <ConnectionLines agents={agents} connections={connections} selectedAgentId={selectedAgent?.id} />
-            {agents.map((agent) => (
-              <AgentStation key={agent.id} agent={agent} isSelected={selectedAgent?.id === agent.id} onClick={() => setSelectedAgent(agent)} onDoubleClick={() => setSelectedAgent(agent)} />
-            ))}
+            {loading && <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">Loading factory floor...</div>}
+            {!loading && !agents.length && (
+              <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">No agents detected. Start an agent or refresh runtime status.</div>
+            )}
+            {!!agents.length && (
+              <>
+                <ConnectionLines agents={agents} connections={connections} selectedAgentId={selectedAgent?.id} />
+                {agents.map((agent) => (
+                  <AgentStation key={agent.id} agent={agent} isSelected={selectedAgent?.id === agent.id} onClick={() => setSelectedAgent(agent)} onDoubleClick={() => setSelectedAgent(agent)} />
+                ))}
+              </>
+            )}
           </div>
         </div>
 

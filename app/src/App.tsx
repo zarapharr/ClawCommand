@@ -59,6 +59,17 @@ function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      let gatewayStatus: 'online' | 'offline' = 'offline';
+      if (typeof window !== 'undefined') {
+        try {
+          const diagnosticsRaw = localStorage.getItem('clawcommand.runtime.diagnostics');
+          const diagnostics = diagnosticsRaw ? JSON.parse(diagnosticsRaw) as { adapterHealth?: 'ok' | 'degraded' | 'offline' } : null;
+          gatewayStatus = diagnostics?.adapterHealth === 'offline' ? 'offline' : 'online';
+        } catch {
+          gatewayStatus = 'offline';
+        }
+      }
+
       setMetrics(prev => ({
         ...prev,
         cpu: {
@@ -67,6 +78,7 @@ function App() {
         },
         gateway: {
           ...prev.gateway,
+          status: gatewayStatus,
           uptime: prev.gateway.uptime + 1,
         },
       }));

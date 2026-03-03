@@ -16,6 +16,7 @@ export function FactoryFloorPage() {
   const [subagentActivities, setSubagentActivities] = useState<Array<{ id: string; task?: string; status: string; lastActivity?: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [runtimeHealth, setRuntimeHealth] = useState<'healthy' | 'degraded' | 'offline'>('offline');
 
   const load = async () => {
     const result = await fetchRuntimeStatus();
@@ -31,6 +32,7 @@ export function FactoryFloorPage() {
       status: item.status,
       lastActivity: item.lastActivity,
     })));
+    setRuntimeHealth(result.data.health);
     setError(null);
   };
 
@@ -48,7 +50,25 @@ export function FactoryFloorPage() {
     };
   }, []);
 
-  const metrics = useMemo(() => runtimeMetrics({ agents, sessions: [], subagents: [], adapterHealth: 'ok', health: 'healthy', lastSyncAt: new Date().toISOString() }), [agents]);
+  const metrics = useMemo(() => runtimeMetrics({ agents, sessions: sessions.map((session) => ({
+    id: session.key,
+    key: session.key,
+    agentId: session.agentId,
+    agentName: session.agentId,
+    agentEmoji: '💬',
+    status: 'active',
+    messageCount: session.messageCount,
+    createdAt: new Date().toISOString(),
+    lastActivity: new Date().toISOString(),
+    messages: [],
+  })), subagents: subagentActivities.map((subagent) => ({
+    id: subagent.id,
+    parentSessionId: '',
+    status: subagent.status as 'active' | 'idle' | 'completed' | 'error',
+    task: subagent.task,
+    startedAt: new Date().toISOString(),
+    lastActivity: subagent.lastActivity,
+  })), adapterHealth: runtimeHealth === 'healthy' ? 'ok' : runtimeHealth === 'degraded' ? 'degraded' : 'offline', health: runtimeHealth, lastSyncAt: new Date().toISOString() }), [agents, runtimeHealth, sessions, subagentActivities]);
   const connections: AgentConnection[] = useMemo(() => {
     const byAgent = new Map<string, number>();
     for (const session of sessions) {
@@ -68,7 +88,7 @@ export function FactoryFloorPage() {
       });
   }, [agents, sessions]);
 
-  const systemMetrics: SystemMetrics = useMemo(() => ({ cpu: { usage: Math.min(95, 15 + metrics.workingAgents * 10) }, memory: { total: 100, used: Math.min(95, 20 + metrics.onlineAgents * 8), free: 100 - Math.min(95, 20 + metrics.onlineAgents * 8) }, disk: { total: 100, used: 48, free: 52 }, gateway: { status: error ? 'offline' : 'online', uptime: 0, connectedChannels: [] } }), [metrics, error]);
+  const systemMetrics: SystemMetrics = useMemo(() => ({ cpu: { usage: Math.min(95, 15 + metrics.workingAgents * 10) }, memory: { total: 100, used: Math.min(95, 20 + metrics.onlineAgents * 8), free: 100 - Math.min(95, 20 + metrics.onlineAgents * 8) }, disk: { total: 100, used: 48, free: 52 }, gateway: { status: runtimeHealth === 'offline' ? 'offline' : 'online', uptime: 0, connectedChannels: [] } }), [metrics, runtimeHealth]);
   const activities: ActivityEvent[] = useMemo(() => subagentActivities.map((item) => ({ id: item.id, agentId: item.id, agentName: item.id, agentEmoji: '⚙️', type: item.status === 'error' ? 'error' : 'status_change', message: item.task || item.status, timestamp: item.lastActivity || new Date().toISOString() })), [subagentActivities]);
 
   return (

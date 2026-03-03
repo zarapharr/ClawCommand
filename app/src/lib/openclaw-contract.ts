@@ -186,3 +186,26 @@ export const agentActionMatrix: Record<ActionMatrixKey, { method: string; buildP
   kill: { method: 'subagents.kill', buildParams: (target) => ({ target }) },
   escalate: { method: 'subagents.steer', buildParams: (target) => ({ target, message: 'escalate' }) },
 };
+
+export const verifiedGatewayMethods = {
+  supported: new Set([
+    'agents.list',
+    'sessions.list',
+    'models.list',
+    'health',
+    'chat.history',
+    'chat.send',
+    'chat.abort',
+    'sessions.reset',
+    'agents.files.list',
+    'agents.files.get',
+  ]),
+  unsupported: new Set([
+    'subagents.list',
+    'agents.start',
+    'agents.stop',
+    'agents.retry',
+    'subagents.kill',
+    'subagents.steer',
+  ]),
+} as const;

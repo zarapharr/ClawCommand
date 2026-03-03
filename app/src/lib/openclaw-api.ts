@@ -1,5 +1,5 @@
 import type { Agent, Message, Session } from '@/types';
-import { agentActionMatrix, contracts, gatewayMethodMatrix, mapAgent, mapHistoryMessage, mapSession, sessionActionMatrix, type ActionMatrixKey } from '@/lib/openclaw-contract';
+import { agentActionMatrix, contracts, gatewayMethodMatrix, mapAgent, mapHistoryMessage, mapSession, sessionActionMatrix, verifiedGatewayMethods, type ActionMatrixKey } from '@/lib/openclaw-contract';
 
 const DEFAULT_GATEWAY_URL = 'ws://127.0.0.1:18789';
 
@@ -99,6 +99,20 @@ function randomId() {
 
 function getError(message: string, retryable = true): ApiErr {
   return { ok: false, error: message, status: null, retryable };
+}
+
+function methodSupported(method: string): boolean {
+  return verifiedGatewayMethods.supported.has(method as never);
+}
+
+function unsupportedActionReceipt(method: string, request: ActionRequest): ActionReceipt {
+  return {
+    id: randomId(),
+    commandId: randomId(),
+    status: 'failed',
+    error: `${request.targetType}.${request.action} blocked: gateway method \"${method}\" is unavailable on this OpenClaw instance. Workaround: use session-level controls (sessions.reset/chat.abort) or CLI actions directly.`,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 async function callGateway<T>(method: string, params: Record<string, unknown> = {}): Promise<ApiResult<T>> {
@@ -321,7 +335,9 @@ export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
     fetchAgents(),
     fetchSessions(),
     callGateway<unknown>(gatewayMethodMatrix.health.check.method),
-    callGateway<unknown>(gatewayMethodMatrix.subagents.list.method).catch(() => getError('subagents.list unavailable')),
+    methodSupported(gatewayMethodMatrix.subagents.list.method)
+      ? callGateway<unknown>(gatewayMethodMatrix.subagents.list.method).catch(() => getError('subagents.list unavailable'))
+      : Promise.resolve(getError('subagents.list unavailable', false)),
   ]);
   if (!agents.ok) return agents;
   if (!sessions.ok) return sessions;
@@ -356,6 +372,11 @@ export async function fetchRuntimeStatus(): Promise<ApiResult<RuntimeStatus>> {
 export async function postRuntimeAction(request: ActionRequest): Promise<ApiResult<ActionReceipt>> {
   const matrix = request.targetType === 'agent' ? agentActionMatrix : sessionActionMatrix;
   const spec = matrix[request.action];
+
+  if (!methodSupported(spec.method)) {
+    return { ok: true, status: 200, data: unsupportedActionReceipt(spec.method, request) };
+  }
+
   const result = await callGateway<unknown>(spec.method, spec.buildParams(request.targetId));
   if (!result.ok) {
     return { ok: true, status: 200, data: { id: randomId(), commandId: randomId(), status: 'failed', error: result.error, timestamp: new Date().toISOString() } };
@@ -416,42 +437,44 @@ export function subscribeRuntimeUpdates(onUpdate: (update: RuntimeLiveUpdate) =>
   ws.onopen = () => sendConnect();
 
   ws.onmessage = (event) => {
-    const msg = JSON.parse(String(event.data)) as RpcRes | RpcEvent;
+    try {
+      const msg = JSON.parse(String(event.data)) as RpcRes | RpcEvent;
 
-    if (msg.type === 'event' && msg.event === 'connect.challenge') {
-      sendConnect();
-      return;
+      if (msg.type === 'event' && msg.event === 'connect.challenge') {
+        sendConnect();
+        return;
+      }
+
+      if (msg.type === 'res' && msg.ok) {
+        onState?.('connected');
+        return;
+      }
+
+      if (msg.type !== 'event') return;
+
+      const map: Record<string, RuntimeLiveUpdate['kind']> = {
+        tick: 'tick',
+        'chat.message': 'chat',
+        'agent.status': 'agent_status',
+        'subagents.update': 'subagents',
+      };
+
+      onUpdate({
+        kind: map[msg.event] || 'unknown',
+        payload: msg.payload,
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      startFallback();
     }
-
-    if (msg.type === 'res' && msg.ok) {
-      onState?.('connected');
-      return;
-    }
-
-    if (msg.type !== 'event') return;
-
-    const map: Record<string, RuntimeLiveUpdate['kind']> = {
-      tick: 'tick',
-      'chat.message': 'chat',
-      'agent.status': 'agent_status',
-      'subagents.update': 'subagents',
-    };
-
-    onUpdate({
-      kind: map[msg.event] || 'unknown',
-      payload: msg.payload,
-      timestamp: new Date().toISOString(),
-    });
   };
 
   ws.onerror = () => startFallback();
-  ws.onclose = () => {
-    startFallback();
-    onState?.('closed');
-  };
+  ws.onclose = () => startFallback();
 
   return () => {
     fallbackStop?.();
+    onState?.('closed');
     try { ws.close(); } catch {}
   };
 }

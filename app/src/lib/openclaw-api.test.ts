@@ -76,11 +76,13 @@ describe('openclaw api client gateway contracts', () => {
     const send = await sendMessage('agent:main:telegram:group:1', { content: 'hello' });
     const action = await postRuntimeAction({ targetType: 'session', targetId: 's1', action: 'retry' });
     const killAction = await postRuntimeAction({ targetType: 'session', targetId: 's1', action: 'kill' });
+    const agentAction = await postRuntimeAction({ targetType: 'agent', targetId: 'main', action: 'start' });
 
     expect(runtime.ok).toBe(true);
     expect(send.ok).toBe(true);
     expect(action.ok).toBe(true);
     expect(killAction.ok).toBe(true);
+    expect(agentAction.ok && agentAction.data.status).toBe('failed');
 
     vi.useFakeTimers();
     const stop = startRuntimePolling(1000);
@@ -92,6 +94,7 @@ describe('openclaw api client gateway contracts', () => {
     expect(FakeWebSocket.sentMethods).toContain('agents.list');
     expect(FakeWebSocket.sentMethods).toContain('sessions.list');
     expect(FakeWebSocket.sentMethods).toContain('chat.send');
+    expect(FakeWebSocket.sentMethods).not.toContain('agents.start');
   });
 
   it('fails fast on schema mismatches', async () => {

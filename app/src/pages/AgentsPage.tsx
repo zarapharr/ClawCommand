@@ -41,6 +41,7 @@ export function AgentsPage() {
   const [pendingAction, setPendingAction] = useState<{ id: string; action: 'start' | 'stop' | 'retry' | 'kill' | 'escalate' } | null>(null);
   const [auditLog, setAuditLog] = useState(readOperatorAudit());
   const [decisions, setDecisions] = useState(readDecisionLog());
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setAgents(agentsFeed.data);
@@ -108,19 +109,28 @@ export function AgentsPage() {
   const executeAction = async () => {
     if (!pendingAction) return;
 
+    const runtimeReceipt = await postRuntimeAction({
+      action: pendingAction.action,
+      targetType: 'agent',
+      targetId: pendingAction.id,
+    });
+
     await runOperatorAction({
       action: pendingAction.action,
       source: agentsFeed.source,
       targetId: pendingAction.id,
       targetType: 'agent',
-      payload: { reason: 'operator console action' },
+      payload: {
+        reason: 'operator console action',
+        receipt: runtimeReceipt.ok ? runtimeReceipt.data : { error: runtimeReceipt.error },
+      },
     });
 
-    await postRuntimeAction({
-      action: pendingAction.action,
-      targetType: 'agent',
-      targetId: pendingAction.id,
-    });
+    if (runtimeReceipt.ok && runtimeReceipt.data.status === 'failed') {
+      setActionNotice(runtimeReceipt.data.error || 'Operator action failed.');
+    } else {
+      setActionNotice(runtimeReceipt.ok ? runtimeReceipt.data.result || 'Operator action dispatched.' : runtimeReceipt.error);
+    }
 
     const latestAgents = await fetchAgents();
     if (latestAgents.ok) {
@@ -154,6 +164,8 @@ export function AgentsPage() {
           <Button className="bg-cyan-500 hover:bg-cyan-600 text-black font-medium"><Plus className="w-4 h-4 mr-2" />Create Agent</Button>
         </div>
       </div>
+
+      {actionNotice && <p className="px-6 pt-3 text-xs text-amber-300">{actionNotice}</p>}
 
       <div className="px-6 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><p className="text-xs text-slate-400">Interactions</p><p className="text-lg text-cyan-300 font-semibold">{interactionFeed.data.totalMessages}</p></div>

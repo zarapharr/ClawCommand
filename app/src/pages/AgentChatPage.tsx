@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageSquare, Send, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,18 @@ export function AgentChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [liveState, setLiveState] = useState<'connected' | 'polling-fallback' | 'closed'>('closed');
+  const sessionsRef = useRef<Session[]>([]);
+  const activeSessionRef = useRef<string>('');
+
+  const loadMessages = async (session: Session) => {
+    if (!session.key) return;
+    const result = await fetchSessionMessages(session.key);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setMessages((prev) => ({ ...prev, [session.id]: result.data }));
+  };
 
   const loadSessions = async () => {
     const result = await fetchSessions();
@@ -21,33 +33,49 @@ export function AgentChatPage() {
       return;
     }
     setSessions(result.data);
-    setActiveSessionId((prev) => prev || result.data[0]?.id || '');
+    sessionsRef.current = result.data;
+    setActiveSessionId((prev) => {
+      const next = prev || result.data[0]?.id || '';
+      activeSessionRef.current = next;
+      return next;
+    });
     setError(null);
   };
 
   useEffect(() => {
     void loadSessions();
     const unsubscribe = subscribeRuntimeUpdates((update) => {
-      if (update.kind === 'chat' || update.kind === 'tick') {
+      if (update.kind === 'tick') {
         void loadSessions();
+        return;
+      }
+      if (update.kind === 'chat') {
+        const payload = (update.payload || {}) as { sessionKey?: string };
+        const target = sessionsRef.current.find((session) => session.key === payload.sessionKey) || sessionsRef.current.find((session) => session.id === activeSessionRef.current);
+        if (target) {
+          void loadMessages(target);
+        } else {
+          void loadSessions();
+        }
       }
     }, setLiveState);
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    activeSessionRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   const activeSession = useMemo(() => sessions.find((session) => session.id === activeSessionId), [sessions, activeSessionId]);
 
   useEffect(() => {
     const session = sessions.find((item) => item.id === activeSessionId);
     if (!session?.key) return;
-    void (async () => {
-      const result = await fetchSessionMessages(session.key);
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      setMessages((prev) => ({ ...prev, [session.id]: result.data }));
-    })();
+    void loadMessages(session);
   }, [sessions, activeSessionId]);
 
   const handleSend = async () => {

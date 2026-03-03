@@ -7,6 +7,7 @@ import {
   readDecisionLog,
   readOperatorAudit,
   reconcileOperatorLedgers,
+  runOperatorAction,
   sanitizePayloadPreview,
 } from '@/lib/runtime-adapters';
 
@@ -95,6 +96,54 @@ describe('runtime adapters', () => {
     const diagnostics = getDiagnostics();
     expect(diagnostics.data.adapterHealth).toBe('offline');
     expect(diagnostics.health).toBe('offline');
+  });
+
+  it('runs operator actions through endpoint and records success receipt', async () => {
+    vi.stubEnv('VITE_RUNTIME_ACTION_ENDPOINT', 'https://runtime.example/actions');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+    const receipt = await runOperatorAction({
+      action: 'retry',
+      source: 'live',
+      targetId: 'session-2',
+      targetType: 'session',
+      payload: { retry: true },
+    });
+
+    expect(receipt.status).toBe('success');
+    expect(receipt.result).toContain('Dispatched');
+    expect(readDecisionLog()[0].targetId).toBe('session-2');
+    expect(readOperatorAudit()[0].targetId).toBe('session-2');
+    expect(fetch).toHaveBeenCalledWith(
+      'https://runtime.example/actions',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('records failed audit receipt when action endpoint fails', async () => {
+    vi.stubEnv('VITE_RUNTIME_ACTION_ENDPOINT', 'https://runtime.example/actions');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+    const receipt = await runOperatorAction({
+      action: 'kill',
+      source: 'live',
+      targetId: 'session-9',
+      targetType: 'session',
+      payload: { reason: 'hung process' },
+    });
+
+    expect(receipt.status).toBe('failed');
+    expect(receipt.error).toContain('Action endpoint failed with status 503');
+    expect(readDecisionLog()).toHaveLength(0);
+    expect(readOperatorAudit()[0].action).toBe('kill');
+  });
+
+  it('sanitizes malformed and unserializable payloads safely', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(() => sanitizePayloadPreview(circular)).not.toThrow();
+    expect(sanitizePayloadPreview(circular)).not.toBe('none');
   });
 
   it('formats freshness labels consistently', () => {

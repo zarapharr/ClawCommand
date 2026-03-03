@@ -341,7 +341,17 @@ export async function reconcileOperatorLedgers(): Promise<{ decisions: DecisionL
 }
 
 export function sanitizePayloadPreview(payload: unknown): string {
-  const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  let raw: string | undefined;
+  if (typeof payload === 'string') {
+    raw = payload;
+  } else {
+    try {
+      raw = JSON.stringify(payload);
+    } catch {
+      raw = '[unserializable-payload]';
+    }
+  }
+
   if (!raw) return 'none';
   return redactValue(raw, defaultEnvironmentProfile.redaction).slice(0, 240);
 }

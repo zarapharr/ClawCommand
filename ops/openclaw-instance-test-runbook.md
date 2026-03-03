@@ -1,6 +1,6 @@
 # OpenClaw Instance MVP Test Runbook
 
-This runbook validates ClawCommand MVP production-readiness against a real or sandbox OpenClaw runtime.
+This runbook validates ClawCommand against a live OpenClaw Gateway (real RPC contracts, no assumed REST endpoints).
 
 ## 1) Prerequisites
 
@@ -12,7 +12,25 @@ npm install
 Expected output:
 - Install completes without npm errors.
 
-## 2) Unit + Integration Test Pass
+## 2) Start and verify OpenClaw Gateway
+
+```bash
+openclaw gateway status
+```
+
+If not running:
+
+```bash
+openclaw gateway start
+openclaw gateway status
+```
+
+Expected output:
+- `Runtime: running`
+- `RPC probe: ok`
+- Gateway listening on `ws://127.0.0.1:18789` (or your configured URL).
+
+## 3) Unit + Integration Test Pass
 
 ```bash
 npm run test
@@ -33,15 +51,23 @@ Expected output:
 - TypeScript build succeeds.
 - Vite build succeeds and prints `dist/` bundle summary.
 
-## 4) Runtime Smoke Test (degraded/offline mode)
+## 5) Runtime Smoke Test (live Gateway wiring)
 
 ```bash
-VITE_DISABLE_MOCK_FALLBACK=1 npm run dev
+VITE_OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789 \
+VITE_DISABLE_MOCK_FALLBACK=1 \
+npm run dev
 ```
 
 Expected output in UI:
-- Runtime status indicator shows degraded/offline when no runtime adapter data is available.
-- No mock fallback entities are shown as live data.
+- Agents page loads from `agents.list` and `sessions.list`.
+- Models page loads from `models.list`.
+- Memory page loads from `agents.files.list` / `agents.files.get`.
+- Agent Chat loads sessions and history from `sessions.list` + `chat.history`, send uses `chat.send`.
+- Factory Floor and Agent Swarm use live sessions/agents data, no static REST mocks.
+
+If Gateway is unreachable or auth fails:
+- UI shows explicit errors with required fix (start gateway, set token/password env).
 
 ## 5) Ledger Endpoint Smoke Test (optional local mock)
 

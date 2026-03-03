@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { MessageSquare, Send, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { fetchSessions, sendMessage } from '@/lib/openclaw-api';
+import { fetchSessionMessages, fetchSessions, sendMessage } from '@/lib/openclaw-api';
 import type { Session } from '@/types';
 
 export function AgentChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
+  const [messages, setMessages] = useState<Record<string, Session['messages']>>({});
   const [inputValue, setInputValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -29,10 +30,24 @@ export function AgentChatPage() {
 
   const activeSession = useMemo(() => sessions.find((session) => session.id === activeSessionId), [sessions, activeSessionId]);
 
+  useEffect(() => {
+    const session = sessions.find((item) => item.id === activeSessionId);
+    if (!session?.key) return;
+    void (async () => {
+      const result = await fetchSessionMessages(session.key);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setMessages((prev) => ({ ...prev, [session.id]: result.data }));
+    })();
+  }, [sessions, activeSessionId]);
+
   const handleSend = async () => {
     if (!activeSessionId || !inputValue.trim()) return;
     setSending(true);
-    const result = await sendMessage(activeSessionId, { content: inputValue });
+    const sessionKey = activeSession?.key || activeSessionId;
+    const result = await sendMessage(sessionKey, { content: inputValue });
     setSending(false);
 
     if (!result.ok) {
@@ -71,13 +86,13 @@ export function AgentChatPage() {
 
         <div className="flex-1 flex flex-col">
           <div className="flex-1 p-6 overflow-auto space-y-3">
-            {(activeSession?.messages || []).map((message) => (
+            {(messages[activeSessionId] || activeSession?.messages || []).map((message) => (
               <div key={message.id} className={`rounded-lg border p-3 ${message.role === 'user' ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-slate-900/30 border-slate-800'}`}>
                 <p className="text-xs text-slate-400 mb-1">{message.role}</p>
                 <p className="text-sm text-slate-200 whitespace-pre-wrap">{message.content}</p>
               </div>
             ))}
-            {!(activeSession?.messages || []).length && <p className="text-slate-500">No messages in this session yet.</p>}
+            {!(messages[activeSessionId] || activeSession?.messages || []).length && <p className="text-slate-500">No messages in this session yet.</p>}
           </div>
 
           <div className="p-4 border-t border-slate-800/50 flex gap-2">

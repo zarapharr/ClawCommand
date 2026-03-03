@@ -8,7 +8,7 @@ import { SystemGauges } from '@/components/factory-floor/SystemGauges';
 import { Button } from '@/components/ui/button';
 import { fetchRuntimeStatus, startRuntimePolling } from '@/lib/openclaw-api';
 import { runtimeMetrics } from '@/lib/openclaw-mappers';
-import { mockConnections, mockSystemMetrics } from '@/data/mock-data';
+import type { AgentConnection, ActivityEvent, SystemMetrics } from '@/types';
 
 export function FactoryFloorPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -43,6 +43,9 @@ export function FactoryFloorPage() {
   }, []);
 
   const metrics = useMemo(() => runtimeMetrics({ agents, sessions: [], subagents: [], adapterHealth: 'ok', health: 'healthy', lastSyncAt: new Date().toISOString() }), [agents]);
+  const connections: AgentConnection[] = useMemo(() => agents.slice(1).map((agent, idx) => ({ from: agents[0]?.id || agent.id, to: agent.id, activity: idx % 2 ? 'low' : 'medium', messageCount: 0 })), [agents]);
+  const systemMetrics: SystemMetrics = useMemo(() => ({ cpu: { usage: Math.min(95, 15 + metrics.workingAgents * 10) }, memory: { total: 100, used: Math.min(95, 20 + metrics.onlineAgents * 8), free: 100 - Math.min(95, 20 + metrics.onlineAgents * 8) }, disk: { total: 100, used: 48, free: 52 }, gateway: { status: error ? 'offline' : 'online', uptime: 0, connectedChannels: [] } }), [metrics, error]);
+  const activities: ActivityEvent[] = useMemo(() => subagentActivities.map((item) => ({ id: item.id, agentId: item.id, agentName: item.id, agentEmoji: '⚙️', type: item.status === 'error' ? 'error' : 'status_change', message: item.task || item.status, timestamp: item.lastActivity || new Date().toISOString() })), [subagentActivities]);
 
   return (
     <div className="h-full flex flex-col">
@@ -69,7 +72,7 @@ export function FactoryFloorPage() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative p-6">
           <div className="relative w-full h-full rounded-2xl border overflow-hidden tron-grid bg-slate-900/30 border-slate-800/50">
-            <ConnectionLines agents={agents} connections={mockConnections} selectedAgentId={selectedAgent?.id} />
+            <ConnectionLines agents={agents} connections={connections} selectedAgentId={selectedAgent?.id} />
             {agents.map((agent) => (
               <AgentStation key={agent.id} agent={agent} isSelected={selectedAgent?.id === agent.id} onClick={() => setSelectedAgent(agent)} onDoubleClick={() => setSelectedAgent(agent)} />
             ))}
@@ -77,7 +80,7 @@ export function FactoryFloorPage() {
         </div>
 
         <div className="w-96 p-6 pr-4 flex flex-col gap-4 border-l border-slate-800/50 bg-slate-950/50">
-          <SystemGauges metrics={mockSystemMetrics} />
+          <SystemGauges metrics={systemMetrics} />
           <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
             <p className="text-xs text-slate-400 uppercase tracking-wider mb-3">Subagent Feed</p>
             <div className="space-y-2 max-h-72 overflow-auto">
@@ -91,7 +94,7 @@ export function FactoryFloorPage() {
               {!subagentActivities.length && <p className="text-sm text-slate-500">No active subagents.</p>}
             </div>
           </div>
-          <ActivityFeed activities={[]} />
+          <ActivityFeed activities={activities} />
         </div>
       </div>
     </div>

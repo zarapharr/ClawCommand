@@ -1,59 +1,87 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchAgents, fetchMemoryFile, fetchMemoryIndex, fetchModelConfig, fetchRuntimeStatus, fetchSessions, postRuntimeAction, sendMessage, startRuntimePolling } from '@/lib/openclaw-api';
+import { fetchAgents, fetchMemoryFile, fetchMemoryIndex, fetchModelConfig, fetchRuntimeStatus, fetchSessionMessages, fetchSessions, postRuntimeAction, sendMessage, startRuntimePolling } from '@/lib/openclaw-api';
 
-describe('openclaw api client', () => {
+class FakeWebSocket {
+  static responses: Record<string, unknown> = {};
+  static sentMethods: string[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  readyState = 1;
+
+  constructor(_url: string) {
+    setTimeout(() => this.onopen?.(), 0);
+  }
+
+  send(payload: string) {
+    const req = JSON.parse(payload);
+    FakeWebSocket.sentMethods.push(req.method);
+    if (req.method === 'connect') {
+      this.onmessage?.({ data: JSON.stringify({ type: 'res', id: req.id, ok: true, payload: { protocol: 3 } }) });
+      return;
+    }
+    const response = FakeWebSocket.responses[req.method] ?? {};
+    this.onmessage?.({ data: JSON.stringify({ type: 'res', id: req.id, ok: true, payload: response }) });
+  }
+
+  close() {}
+}
+
+describe('openclaw api client gateway contracts', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.stubEnv('VITE_OPENCLAW_API_BASE', 'https://runtime.example');
-    vi.stubEnv('VITE_OPENCLAW_API_TOKEN', 'token');
+    vi.stubEnv('VITE_OPENCLAW_GATEWAY_URL', 'ws://127.0.0.1:18789');
+    FakeWebSocket.responses = {
+      'agents.list': { agents: [{ id: 'main', name: 'Main', identity: { emoji: '⚡', theme: 'Ops' } }] },
+      'sessions.list': { sessions: [{ key: 'agent:main:telegram:group:1', sessionId: 's1', updatedAt: Date.now() }] },
+      'models.list': { models: [{ id: 'gpt-5.3-codex', provider: 'openai-codex' }] },
+      'agents.files.list': { workspace: '/tmp', files: [{ path: '/tmp/MEMORY.md', name: 'MEMORY.md', size: 4, updatedAtMs: Date.now() }] },
+      'agents.files.get': { file: { path: '/tmp/MEMORY.md', content: 'memo', size: 4, updatedAtMs: Date.now() } },
+      health: { ok: true },
+      'chat.history': { messages: [{ id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'hi' }] }] },
+      'chat.send': { accepted: true },
+      'sessions.reset': { ok: true },
+    };
+    FakeWebSocket.sentMethods = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket as any);
     localStorage.clear();
   });
 
-  it('calls all P0 endpoints', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
+  it('maps gateway RPC contracts for agents/sessions/models/memory/chat', async () => {
+    const agents = await fetchAgents();
+    const sessions = await fetchSessions();
+    const models = await fetchModelConfig();
+    const memory = await fetchMemoryIndex();
+    const file = await fetchMemoryFile('/tmp/MEMORY.md');
+    const history = await fetchSessionMessages('agent:main:telegram:group:1');
 
-    await fetchAgents();
-    await fetchSessions();
-    await fetchModelConfig();
-    await fetchMemoryIndex();
-    await fetchMemoryFile('memory/2026-03-03.md');
-    await fetchRuntimeStatus();
-    await sendMessage('session-1', { content: 'hello' });
-    await postRuntimeAction({ targetType: 'session', targetId: 'session-1', action: 'retry' });
-
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/agents', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/sessions', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/models', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/memory', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/memory/memory%2F2026-03-03.md', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/runtime/status', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/sessions/session-1/messages', expect.any(Object));
-    expect(fetch).toHaveBeenCalledWith('https://runtime.example/api/runtime/actions', expect.any(Object));
+    expect(agents.ok && agents.data[0].id).toBe('main');
+    expect(sessions.ok && sessions.data[0].id).toBe('s1');
+    expect(models.ok && models.data.providers[0].id).toBe('openai-codex');
+    expect(memory.ok && memory.data.files[0].name).toBe('MEMORY.md');
+    expect(file.ok && file.data.content).toBe('memo');
+    expect(history.ok && history.data[0].content).toBe('hi');
   });
 
-  it('writes runtime polling snapshot to localStorage', async () => {
+  it('supports runtime status, send message, action dispatch, and polling', async () => {
+    const runtime = await fetchRuntimeStatus();
+    const send = await sendMessage('agent:main:telegram:group:1', { content: 'hello' });
+    const action = await postRuntimeAction({ targetType: 'session', targetId: 's1', action: 'retry' });
+
+    expect(runtime.ok).toBe(true);
+    expect(send.ok).toBe(true);
+    expect(action.ok).toBe(true);
+
     vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ agents: [{ id: 'a' }], sessions: [{ id: 's' }], health: 'healthy', lastSyncAt: new Date().toISOString(), subagents: [], adapterHealth: 'ok' }),
-    }));
-
     const stop = startRuntimePolling(1000);
-    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(1200);
     stop();
-
-    expect(localStorage.getItem('clawcommand.runtime.agents')).toContain('"id":"a"');
-    expect(localStorage.getItem('clawcommand.runtime.sessions')).toContain('"id":"s"');
+    expect(localStorage.getItem('clawcommand.runtime.agents')).toContain('main');
     vi.useRealTimers();
-  });
 
-  it('uses default local API base when env base is missing', async () => {
-    vi.stubEnv('VITE_OPENCLAW_API_BASE', '');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
-
-    const result = await fetchAgents();
-    expect(result.ok).toBe(true);
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3001/api/agents', expect.any(Object));
+    expect(FakeWebSocket.sentMethods).toContain('agents.list');
+    expect(FakeWebSocket.sentMethods).toContain('sessions.list');
+    expect(FakeWebSocket.sentMethods).toContain('chat.send');
   });
 });

@@ -18,6 +18,8 @@ Client params now pinned to:
 
 ## Method contracts currently wired
 
+### Confirmed available on this exact OpenClaw instance
+
 - `agents.list` -> `{ agents: AgentLike[] }`
 - `sessions.list` -> `{ sessions: SessionLike[] }` with params `{ includeUnknown: true, limit: 120 }`
 - `models.list` -> `{ models: {id, provider?}[] }`
@@ -28,7 +30,17 @@ Client params now pinned to:
 - `sessions.reset` -> session start/retry/escalate path
 - `agents.files.list` -> `{ workspace?, files[] }`
 - `agents.files.get` -> `{ file? }`
-- `subagents.list` -> optional, consumed when available
+
+### Confirmed unavailable on this exact OpenClaw instance
+
+- `subagents.list`
+- `agents.start`
+- `agents.stop`
+- `agents.retry`
+- `subagents.kill`
+- `subagents.steer`
+
+UI behavior now hard-fails these with explicit operator receipts and workaround guidance.
 
 ## Guardrails in code
 

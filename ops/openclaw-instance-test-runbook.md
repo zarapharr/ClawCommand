@@ -44,11 +44,15 @@ Must pass TypeScript and Vite build.
 
 ## 5) Live runtime smoke test
 
+Use the local bridge path first, this is the most reliable path when direct browser WS is constrained:
+
 ```bash
 VITE_OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789 \
 VITE_DISABLE_MOCK_FALLBACK=1 \
 npm run dev
 ```
+
+The Vite bridge endpoint (`POST /ocapi/call`) executes `openclaw gateway call ...` locally and is attempted before direct WS RPC.
 
 Validate in UI:
 - Agent Command loads `agents.list`, `sessions.list`, and action buttons call mapped runtime operations.
@@ -83,8 +87,10 @@ Expected:
 
 ## 7) Known limitations (current)
 
-- Agent action methods (`agents.start|stop|retry`) depend on runtime support. Unsupported methods return failed receipts and are surfaced in UI.
-- Subagent stream event names vary by gateway build. Current client handles `subagents.update` plus fallback polling.
+- This gateway build does not expose `agents.start|agents.stop|agents.retry|subagents.list|subagents.kill|subagents.steer`.
+  - Workaround: use session-level actions (`sessions.reset`, `chat.abort`) in Swarm, or run CLI actions directly.
+  - Agent Command now returns explicit failed receipts instead of silent no-op.
+- Subagent live topology falls back to session-derived activity when `subagents.list` is unavailable.
 - Chat streaming granularity depends on gateway event payload availability.
 
 ## 8) Exit criteria
@@ -94,3 +100,20 @@ Prod-readiness pass is complete when:
 - Build passes
 - Gateway-contract pages (Agents, Swarm, Factory Floor, Chat, Memory) work against live gateway
 - Fallback behavior is explicit and recoverable
+
+## 9) Eric review checklist (immediate)
+
+From `app/`:
+
+1. `npm test`
+2. `npm run build`
+3. `openclaw gateway status` (must show `RPC probe: ok`)
+4. `npm run dev`
+5. In browser, verify:
+   - Agent Command: pick an agent, click Start, confirm receipt explains unsupported method.
+   - Agent Swarm: pick a session, click Start then Stop, confirm success receipts.
+   - Factory Floor: confirm node count and session edges update after Refresh.
+   - Agent Chat: open a session, send a message, verify message appears and history reloads.
+   - Memory: switch agent scope, open `.md` file, content renders read-only.
+6. Optional outage drill: `openclaw gateway stop`, verify pages enter fallback state, then `openclaw gateway start` and refresh.
+

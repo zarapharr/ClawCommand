@@ -27,6 +27,7 @@ export const useGateway = (options: UseGatewayOptions = {}) => {
   const wsRef = useRef<WebSocket | null>(null);
   const retryCountRef = useRef(0);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectRef = useRef<() => void>(null);
 
   const url = 'ws://127.0.0.1:8000/ws';
 
@@ -75,7 +76,7 @@ export const useGateway = (options: UseGatewayOptions = {}) => {
           const delay = calculateDelay();
           console.log(`→ Reconnecting gateway in ${Math.round(delay)}ms`);
           retryCountRef.current++;
-          retryTimeoutRef.current = setTimeout(connect, delay);
+          retryTimeoutRef.current = setTimeout(() => connectRef.current?.(), delay);
         } else {
           console.error('✗ Max gateway reconnection attempts reached');
         }
@@ -88,6 +89,10 @@ export const useGateway = (options: UseGatewayOptions = {}) => {
       onError?.(error);
     }
   }, [url, maxRetries, calculateDelay, onMessage, onError]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const send = useCallback((msg: any) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -111,7 +116,7 @@ export const useGateway = (options: UseGatewayOptions = {}) => {
   useEffect(() => {
     connect();
     return () => disconnect();
-  }, []);
+  }, [connect, disconnect]);
 
   return {
     isConnected,

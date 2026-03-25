@@ -118,9 +118,8 @@ export function AgentsPage({ initialSelectedAgentId = null }: AgentsPageProps) {
       return;
     }
     setConfigDraft(hydrateDraft(selectedAgent));
-  }, [hydrateDraft, selectedAgent?.id]);
+  }, [hydrateDraft, selectedAgent]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     void reconcileOperatorLedgers().then(({ audit, decisions: syncedDecisions }) => {
       setAuditLog(audit);

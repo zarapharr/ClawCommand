@@ -32,6 +32,7 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
   const wsRef = useRef<WebSocket | null>(null);
   const retryCountRef = useRef(0);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectRef = useRef<() => void>(null);
 
   const calculateDelay = useCallback(() => {
     const delay = Math.min(
@@ -82,8 +83,7 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
           const delay = calculateDelay();
           console.log(`Retrying WebSocket connection in ${Math.round(delay)}ms`);
           retryCountRef.current++;
-          // eslint-disable-next-line @typescript-eslint/no-use-before-define
-          retryTimeoutRef.current = setTimeout(connect, delay);
+          retryTimeoutRef.current = setTimeout(() => connectRef.current?.(), delay);
         }
       };
 
@@ -93,8 +93,11 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
       console.error(error);
       onError?.(error);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, maxRetries, calculateDelay, onMessage, onError, onConnect, onDisconnect]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const send = useCallback((data: any) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -116,11 +119,9 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     connect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => disconnect();
-  }, [url]); // Only depend on URL, connect/disconnect form a closure
+  }, [connect, disconnect]);
 
   return {
     isConnected,

@@ -1,0 +1,17 @@
+project: claw-command
+status: active
+sprint_goal: "Fix Workflow Builder and Budget Control, then deploy"
+backlog_depth: 0
+wip_count: 0
+last_success: null
+last_failure: null
+active_blockers: []
+quality_signals: {}
+recent_insights: []
+next_recommended_action: null
+autonomy:
+  max_runs_per_day: 10
+  max_agent_minutes_per_day: 90
+  max_cloud_escalations_per_day: 3
+  wake_policy: continuous_bounded
+  active_window: "07:00-19:00"

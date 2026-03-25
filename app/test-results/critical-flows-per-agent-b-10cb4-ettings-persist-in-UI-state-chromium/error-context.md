@@ -1,0 +1,222 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e8]: 🦞
+        - heading "ClawCommand" [level=1] [ref=e10]
+      - navigation [ref=e11]:
+        - button "Factory Floor" [ref=e12] [cursor=pointer]:
+          - img [ref=e13]
+          - generic [ref=e15]: Factory Floor
+        - button "Agent Command" [ref=e16] [cursor=pointer]:
+          - img [ref=e17]
+          - generic [ref=e22]: Agent Command
+        - button "Agent Chat" [ref=e23] [cursor=pointer]:
+          - img [ref=e24]
+          - generic [ref=e26]: Agent Chat
+        - button "Agent Swarm" [ref=e27] [cursor=pointer]:
+          - img [ref=e28]
+          - generic [ref=e33]: Agent Swarm
+        - button "Voice Hub" [ref=e34] [cursor=pointer]:
+          - img [ref=e35]
+          - generic [ref=e39]: Voice Hub
+        - button "QMD Analytics" [ref=e40] [cursor=pointer]:
+          - img [ref=e41]
+          - generic [ref=e45]: QMD Analytics
+        - button "Mission Control Demo" [ref=e46] [cursor=pointer]:
+          - img [ref=e47]
+          - generic [ref=e54]: Mission Control Demo
+        - button "Skills Forge" [ref=e55] [cursor=pointer]:
+          - img [ref=e56]
+          - generic [ref=e58]: Skills Forge
+        - button "Task Command" [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+          - generic [ref=e63]: Task Command
+        - button "Session Center" [ref=e64] [cursor=pointer]:
+          - img [ref=e65]
+          - generic [ref=e67]: Session Center
+        - button "Workflow Builder" [ref=e68] [cursor=pointer]:
+          - img [ref=e69]
+          - generic [ref=e73]: Workflow Builder
+        - button "Model Routing" [ref=e74] [cursor=pointer]:
+          - img [ref=e75]
+          - generic [ref=e79]: Model Routing
+        - button "Budget Control" [ref=e80] [cursor=pointer]:
+          - img [ref=e81]
+          - generic [ref=e83]: Budget Control
+        - button "Analytics" [ref=e85] [cursor=pointer]:
+          - img [ref=e86]
+          - generic [ref=e88]: Analytics
+        - button "Workspace" [ref=e89] [cursor=pointer]:
+          - img [ref=e90]
+          - generic [ref=e92]: Workspace
+        - button "Cron Scheduler" [ref=e93] [cursor=pointer]:
+          - img [ref=e94]
+          - generic [ref=e97]: Cron Scheduler
+        - button "Model Manager" [ref=e98] [cursor=pointer]:
+          - img [ref=e99]
+          - generic [ref=e107]: Model Manager
+        - button "Channel Hub" [ref=e108] [cursor=pointer]:
+          - img [ref=e109]
+          - generic [ref=e115]: Channel Hub
+        - button "Tool Config" [ref=e116] [cursor=pointer]:
+          - img [ref=e117]
+          - generic [ref=e119]: Tool Config
+        - button "System Monitor" [ref=e120] [cursor=pointer]:
+          - img [ref=e121]
+          - generic [ref=e123]: System Monitor
+        - button "Settings" [ref=e124] [cursor=pointer]:
+          - img [ref=e125]
+          - generic [ref=e128]: Settings
+    - generic [ref=e129]:
+      - banner [ref=e130]:
+        - generic [ref=e131]:
+          - button [ref=e132] [cursor=pointer]:
+            - img
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - img [ref=e135]
+              - generic [ref=e138]: CPU
+              - generic [ref=e139]: 42.5%
+            - generic [ref=e140]:
+              - img [ref=e141]
+              - generic [ref=e143]: Agents
+              - generic [ref=e144]: 7/8
+            - generic [ref=e145]:
+              - generic [ref=e146]: Uptime
+              - generic [ref=e147]: 3d 0h
+        - generic [ref=e148]:
+          - generic [ref=e151]: Gateway online
+          - button [ref=e152] [cursor=pointer]:
+            - img
+          - button [ref=e154] [cursor=pointer]:
+            - img
+      - main [ref=e155]:
+        - generic [ref=e156]:
+          - generic [ref=e157]:
+            - generic [ref=e158]:
+              - img [ref=e160]
+              - generic [ref=e163]:
+                - heading "Budget Control" [level=1] [ref=e164]
+                - paragraph [ref=e165]: Token economics & cost management
+            - generic [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]:
+                  - paragraph [ref=e169]: Team Budget
+                  - paragraph [ref=e170]: $1900
+                - generic [ref=e171]:
+                  - paragraph [ref=e172]: Spent
+                  - paragraph [ref=e173]: $1095.03
+                - generic [ref=e174]:
+                  - paragraph [ref=e175]: Remaining
+                  - paragraph [ref=e176]: $804.97
+                - generic [ref=e177]:
+                  - paragraph [ref=e178]: 57.6% used
+                  - progressbar [ref=e179]
+              - button "Alerts 1" [ref=e181] [cursor=pointer]:
+                - img
+                - text: Alerts
+                - generic [ref=e182]: "1"
+              - button "Export" [ref=e183] [cursor=pointer]:
+                - img
+                - text: Export
+          - generic [ref=e185]:
+            - tablist [ref=e186]:
+              - tab "Overview" [selected] [ref=e187] [cursor=pointer]:
+                - img
+                - text: Overview
+              - tab "By Agent" [ref=e188] [cursor=pointer]:
+                - img
+                - text: By Agent
+              - tab "Alerts" [ref=e189] [cursor=pointer]:
+                - img
+                - text: Alerts
+            - tabpanel "Overview" [ref=e191]:
+              - generic [ref=e192]:
+                - generic [ref=e193]:
+                  - heading "Cost by Model Tier" [level=3] [ref=e194]
+                  - img [ref=e198]:
+                    - generic [ref=e200]:
+                      - img [ref=e202]
+                      - img [ref=e204]
+                      - img [ref=e206]
+                  - generic [ref=e207]:
+                    - generic [ref=e208]:
+                      - generic [ref=e211]: Premium
+                      - generic [ref=e212]: $635.00
+                    - generic [ref=e213]:
+                      - generic [ref=e216]: Standard
+                      - generic [ref=e217]: $375.00
+                    - generic [ref=e218]:
+                      - generic [ref=e221]: Economy
+                      - generic [ref=e222]: $85.03
+                - generic [ref=e223]:
+                  - heading "Daily Spend Trend" [level=3] [ref=e224]
+                  - img [ref=e228]:
+                    - generic [ref=e233]:
+                      - generic [ref=e235]: Researcher
+                      - generic [ref=e237]: Writer
+                      - generic [ref=e239]: Coder
+                      - generic [ref=e241]: Analyst
+                      - generic [ref=e243]: Editor
+                      - generic [ref=e245]: Tester
+                      - generic [ref=e247]: Designer
+                    - generic [ref=e249]:
+                      - generic [ref=e251]: "0"
+                      - generic [ref=e253]: "150"
+                      - generic [ref=e255]: "300"
+                      - generic [ref=e257]: "450"
+                      - generic [ref=e259]: "600"
+                - generic [ref=e282]:
+                  - heading "Quick Stats" [level=3] [ref=e283]
+                  - generic [ref=e284]:
+                    - generic [ref=e285]:
+                      - generic [ref=e286]:
+                        - img [ref=e287]
+                        - generic [ref=e290]: Avg Daily Spend
+                      - generic [ref=e291]: $36.53
+                    - generic [ref=e292]:
+                      - generic [ref=e293]:
+                        - img [ref=e294]
+                        - generic [ref=e297]: Highest Spender
+                      - generic [ref=e298]: Coder
+                    - generic [ref=e299]:
+                      - generic [ref=e300]:
+                        - img [ref=e301]
+                        - generic [ref=e304]: Most Efficient
+                      - generic [ref=e305]: Editor
+                    - generic [ref=e306]:
+                      - generic [ref=e307]:
+                        - img [ref=e308]
+                        - generic [ref=e310]: Cost per Request
+                      - generic [ref=e311]: $0.045
+                - generic [ref=e312]:
+                  - heading "Budget Utilization by Agent" [level=3] [ref=e313]
+                  - generic [ref=e316]:
+                    - img [ref=e317]:
+                      - generic [ref=e321]:
+                        - generic [ref=e323]: "0"
+                        - generic [ref=e325]: "90"
+                        - generic [ref=e327]: "180"
+                        - generic [ref=e329]: "270"
+                        - generic [ref=e331]: "360"
+                      - generic [ref=e333]:
+                        - generic [ref=e335]: Chief of Staff
+                        - generic [ref=e337]: Researcher
+                        - generic [ref=e339]: Writer
+                        - generic [ref=e341]: Coder
+                        - generic [ref=e343]: Analyst
+                        - generic [ref=e345]: Editor
+                        - generic [ref=e347]: Tester
+                        - generic [ref=e349]: Designer
+                    - generic:
+                      - generic:
+                        - paragraph: Researcher
+                        - list:
+                          - listitem: "spent : 189.23"
+                          - listitem: "remaining : 110.77000000000001"
+  - generic [ref=e386]: Staff
+```

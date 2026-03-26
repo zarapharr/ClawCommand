@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
-import { 
-  Mic, Play, Pause, Square, Settings, Volume2, 
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Mic, Play, Pause, Square, Settings, Volume2,
   Trash2, Loader2, CheckCircle, AlertCircle,
-  Brain, Speaker, Music, Wand2, Languages, Save
+  Brain, Speaker, Music, Wand2, Languages, Save,
+  Send, MessageSquare, RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -14,6 +15,12 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { fetchSessions, fetchSessionMessages, sendMessage } from '@/lib/openclaw-api';
+import type { Session, Message } from '@/types';
+
+// ---------------------------------------------------------------------------
+// Local types
+// ---------------------------------------------------------------------------
 
 interface VoiceRecording {
   id: string;
@@ -29,18 +36,20 @@ interface TTSVoice {
   name: string;
   language: string;
   gender: 'male' | 'female' | 'neutral';
-  preview?: string;
 }
 
-interface ElevenLabsVoice {
+interface ElevenLabsVoiceOption {
   voice_id: string;
   name: string;
   category: string;
-  description?: string;
-  preview_url?: string;
+  description: string;
 }
 
-const mockTTSVoices: TTSVoice[] = [
+// ---------------------------------------------------------------------------
+// Static voice lists (browser Speech API helpers & well-known ElevenLabs IDs)
+// ---------------------------------------------------------------------------
+
+const TTS_VOICES: TTSVoice[] = [
   { id: 'en-US-Standard-A', name: 'US English (Standard)', language: 'en-US', gender: 'male' },
   { id: 'en-US-Standard-B', name: 'US English (Standard)', language: 'en-US', gender: 'female' },
   { id: 'en-GB-Standard-A', name: 'UK English (Standard)', language: 'en-GB', gender: 'female' },
@@ -52,7 +61,7 @@ const mockTTSVoices: TTSVoice[] = [
   { id: 'zh-CN-Standard-A', name: 'Chinese (Mandarin)', language: 'zh-CN', gender: 'female' },
 ];
 
-const mockElevenLabsVoices: ElevenLabsVoice[] = [
+const ELEVENLABS_VOICES: ElevenLabsVoiceOption[] = [
   { voice_id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', category: 'premade', description: 'Calm and soothing female voice' },
   { voice_id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', category: 'premade', description: 'Strong and energetic female voice' },
   { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', category: 'premade', description: 'Soft and gentle female voice' },
@@ -63,8 +72,29 @@ const mockElevenLabsVoices: ElevenLabsVoice[] = [
   { voice_id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', category: 'premade', description: 'Professional and clear male voice' },
 ];
 
+const ELEVENLABS_STORAGE_KEY = 'clawcommand.elevenlabs.apiKey';
+
+// ---------------------------------------------------------------------------
+// Skeleton component
+// ---------------------------------------------------------------------------
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-slate-700/50 ${className}`} />;
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export function VoicePage() {
-  // Whisper STT State
+  // ---- Gateway session state ----
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string>('');
+  const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+
+  // ---- Whisper STT State ----
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordings, setRecordings] = useState<VoiceRecording[]>([]);
@@ -79,24 +109,85 @@ export function VoicePage() {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // TTS State
+  // ---- TTS State ----
   const [ttsText, setTtsText] = useState('Welcome to ClawCommand. Your voice-enabled agent control center.');
-  const [selectedTTSVoice, setSelectedTTSVoice] = useState(mockTTSVoices[0].id);
+  const [selectedTTSVoice, setSelectedTTSVoice] = useState(TTS_VOICES[0].id);
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
   const [ttsPitch, setTtsPitch] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [ttsHistory, setTtsHistory] = useState<{id: string; text: string; voice: string; timestamp: string}[]>([]);
+  const [ttsHistory, setTtsHistory] = useState<{ id: string; text: string; voice: string; timestamp: string }[]>([]);
+  const [ttsSending, setTtsSending] = useState(false);
+  const [ttsSessionKey, setTtsSessionKey] = useState<string>('');
 
-  // ElevenLabs State
+  // ---- ElevenLabs State ----
   const [elevenLabsKey, setElevenLabsKey] = useState('');
-  const [selectedElevenVoice, setSelectedElevenVoice] = useState(mockElevenLabsVoices[0].voice_id);
+  const [selectedElevenVoice, setSelectedElevenVoice] = useState(ELEVENLABS_VOICES[0].voice_id);
   const [elevenLabsStability, setElevenLabsStability] = useState(0.5);
   const [elevenLabsClarity, setElevenLabsClarity] = useState(0.75);
   const [elevenLabsStyle, setElevenLabsStyle] = useState(0.0);
   const [isElevenLabsConfigured, setIsElevenLabsConfigured] = useState(false);
   const [showElevenConfig, setShowElevenConfig] = useState(false);
 
-  // Recording Timer
+  // ---------------------------------------------------------------------------
+  // Fetch sessions on mount
+  // ---------------------------------------------------------------------------
+
+  const loadSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    const result = await fetchSessions();
+    if (result.ok) {
+      setSessions(result.data);
+    } else {
+      toast.error(`Failed to load sessions: ${result.error}`);
+    }
+    setSessionsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  // Load ElevenLabs key from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem(ELEVENLABS_STORAGE_KEY);
+    if (stored) {
+      setElevenLabsKey(stored);
+      setIsElevenLabsConfigured(true);
+    }
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Fetch messages when a session is selected (STT tab)
+  // ---------------------------------------------------------------------------
+
+  const loadSessionMessages = useCallback(async (sessionKey: string) => {
+    if (!sessionKey) {
+      setSessionMessages([]);
+      return;
+    }
+    setMessagesLoading(true);
+    const result = await fetchSessionMessages(sessionKey);
+    if (result.ok) {
+      setSessionMessages(result.data);
+    } else {
+      toast.error(`Failed to load messages: ${result.error}`);
+      setSessionMessages([]);
+    }
+    setMessagesLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (selectedSessionKey) {
+      void loadSessionMessages(selectedSessionKey);
+    } else {
+      setSessionMessages([]);
+    }
+  }, [selectedSessionKey, loadSessionMessages]);
+
+  // ---------------------------------------------------------------------------
+  // Recording timer
+  // ---------------------------------------------------------------------------
+
   useEffect(() => {
     if (isRecording) {
       recordingIntervalRef.current = setInterval(() => {
@@ -120,7 +211,10 @@ export function VoicePage() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // ---------------------------------------------------------------------------
   // Whisper STT Functions
+  // ---------------------------------------------------------------------------
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -170,17 +264,23 @@ export function VoicePage() {
 
     setRecordings(prev => [newRecording, ...prev]);
 
-    // Simulate Whisper API processing
+    // Browser-side Whisper would go here. For now, mark as completed with
+    // a note that server-side STT integration is pending.
     setTimeout(() => {
-      setRecordings(prev => 
-        prev.map(r => 
-          r.id === newRecording.id 
-            ? { ...r, status: 'completed', transcript: 'This is a simulated transcription from Whisper STT. In production, this would be the actual transcribed text from your audio recording.' }
-            : r
-        )
+      setRecordings(prev =>
+        prev.map(r =>
+          r.id === newRecording.id
+            ? {
+                ...r,
+                status: 'completed' as const,
+                transcript:
+                  'Browser audio captured. Connect a Whisper STT endpoint to produce real transcriptions.',
+              }
+            : r,
+        ),
       );
-      toast.success('Transcription complete!');
-    }, 2000);
+      toast.success('Recording saved');
+    }, 1500);
   };
 
   const deleteRecording = (id: string) => {
@@ -191,22 +291,23 @@ export function VoicePage() {
     toast.success('Recording deleted');
   };
 
+  // ---------------------------------------------------------------------------
   // TTS Functions
+  // ---------------------------------------------------------------------------
+
   const playTTS = () => {
     if (!ttsText.trim()) {
       toast.error('Please enter text to speak');
       return;
     }
 
-    // Use Web Speech API for TTS
     if ('speechSynthesis' in window) {
       const utterance = new SpeechSynthesisUtterance(ttsText);
-      const voice = mockTTSVoices.find(v => v.id === selectedTTSVoice);
-      
+      const voice = TTS_VOICES.find(v => v.id === selectedTTSVoice);
+
       utterance.rate = ttsSpeed;
       utterance.pitch = ttsPitch;
-      
-      // Try to find matching voice
+
       const voices = window.speechSynthesis.getVoices();
       const matchingVoice = voices.find(v => v.lang.startsWith(voice?.language || 'en'));
       if (matchingVoice) {
@@ -216,13 +317,17 @@ export function VoicePage() {
       utterance.onstart = () => setIsPlaying(true);
       utterance.onend = () => {
         setIsPlaying(false);
-        // Add to history
-        setTtsHistory(prev => [{
-          id: Date.now().toString(),
-          text: ttsText,
-          voice: voice?.name || 'Default',
-          timestamp: new Date().toISOString(),
-        }, ...prev].slice(0, 10));
+        setTtsHistory(prev =>
+          [
+            {
+              id: Date.now().toString(),
+              text: ttsText,
+              voice: voice?.name || 'Default',
+              timestamp: new Date().toISOString(),
+            },
+            ...prev,
+          ].slice(0, 10),
+        );
       };
       utterance.onerror = () => {
         setIsPlaying(false);
@@ -242,12 +347,40 @@ export function VoicePage() {
     }
   };
 
+  const sendTtsToAgent = async () => {
+    if (!ttsText.trim()) {
+      toast.error('Please enter text to send');
+      return;
+    }
+    if (!ttsSessionKey) {
+      toast.error('Select a session first');
+      return;
+    }
+    const session = sessions.find(s => s.key === ttsSessionKey);
+    if (!session) {
+      toast.error('Session not found');
+      return;
+    }
+    setTtsSending(true);
+    const result = await sendMessage(session.id, { content: ttsText });
+    setTtsSending(false);
+    if (result.ok) {
+      toast.success('Message sent to agent');
+    } else {
+      toast.error(`Send failed: ${result.error}`);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // ElevenLabs Functions
+  // ---------------------------------------------------------------------------
+
   const saveElevenLabsConfig = () => {
     if (!elevenLabsKey.trim()) {
       toast.error('Please enter your ElevenLabs API key');
       return;
     }
+    localStorage.setItem(ELEVENLABS_STORAGE_KEY, elevenLabsKey);
     setIsElevenLabsConfigured(true);
     setShowElevenConfig(false);
     toast.success('ElevenLabs configuration saved');
@@ -264,19 +397,74 @@ export function VoicePage() {
       return;
     }
 
+    const storedKey = localStorage.getItem(ELEVENLABS_STORAGE_KEY);
+    if (!storedKey) {
+      toast.error('ElevenLabs API key not found. Please reconfigure.');
+      setIsElevenLabsConfigured(false);
+      return;
+    }
+
     toast.info('Generating speech with ElevenLabs...');
-    
-    // Simulate ElevenLabs API call
-    setTimeout(() => {
-      toast.success('Speech generated! (Simulated - connect API for real audio)');
-      setTtsHistory(prev => [{
-        id: Date.now().toString(),
-        text: ttsText,
-        voice: mockElevenLabsVoices.find(v => v.voice_id === selectedElevenVoice)?.name || 'ElevenLabs',
-        timestamp: new Date().toISOString(),
-      }, ...prev].slice(0, 10));
-    }, 1500);
+
+    try {
+      const response = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${selectedElevenVoice}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'xi-api-key': storedKey,
+          },
+          body: JSON.stringify({
+            text: ttsText,
+            model_id: 'eleven_monolingual_v1',
+            voice_settings: {
+              stability: elevenLabsStability,
+              similarity_boost: elevenLabsClarity,
+              style: elevenLabsStyle,
+            },
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        toast.error(`ElevenLabs error (${response.status}): ${errBody.slice(0, 120)}`);
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.play().catch(() => toast.error('Failed to play audio'));
+      audio.onended = () => URL.revokeObjectURL(audioUrl);
+
+      toast.success('Speech generated');
+      setTtsHistory(prev =>
+        [
+          {
+            id: Date.now().toString(),
+            text: ttsText,
+            voice: ELEVENLABS_VOICES.find(v => v.voice_id === selectedElevenVoice)?.name || 'ElevenLabs',
+            timestamp: new Date().toISOString(),
+          },
+          ...prev,
+        ].slice(0, 10),
+      );
+    } catch (err) {
+      toast.error(`ElevenLabs request failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
   };
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  const selectedSession = sessions.find(s => s.key === selectedSessionKey);
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -309,11 +497,14 @@ export function VoicePage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Whisper STT Tab */}
+        {/* ================================================================ */}
+        {/* Whisper STT Tab                                                  */}
+        {/* ================================================================ */}
         <TabsContent value="whisper" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Recording Panel */}
+            {/* Recording Panel + Session Transcript */}
             <div className="lg:col-span-2 space-y-6">
+              {/* Recorder Card */}
               <Card className="bg-slate-900/50 border-slate-800">
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
@@ -323,7 +514,7 @@ export function VoicePage() {
                   <CardDescription>Record audio and transcribe with Whisper</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {/* Recording Visualizer */}
+                  {/* Visualizer */}
                   <div className="relative h-48 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden">
                     <div className="absolute inset-0 flex items-center justify-center gap-1">
                       {Array.from({ length: 40 }).map((_, i) => (
@@ -333,9 +524,7 @@ export function VoicePage() {
                             isRecording ? 'bg-cyan-400 animate-pulse' : 'bg-slate-700'
                           }`}
                           style={{
-                            height: isRecording 
-                              ? `${20 + Math.random() * 60}%` 
-                              : '20%',
+                            height: isRecording ? `${20 + Math.random() * 60}%` : '20%',
                             animationDelay: `${i * 50}ms`,
                           }}
                         />
@@ -361,11 +550,7 @@ export function VoicePage() {
                         Start Recording
                       </Button>
                     ) : (
-                      <Button
-                        size="lg"
-                        variant="destructive"
-                        onClick={stopRecording}
-                      >
+                      <Button size="lg" variant="destructive" onClick={stopRecording}>
                         <Square className="w-5 h-5 mr-2" />
                         Stop Recording
                       </Button>
@@ -389,7 +574,7 @@ export function VoicePage() {
                         <p className="text-sm">Start recording to transcribe audio</p>
                       </div>
                     ) : (
-                      recordings.map((recording) => (
+                      recordings.map(recording => (
                         <div
                           key={recording.id}
                           onClick={() => setSelectedRecording(recording)}
@@ -413,7 +598,8 @@ export function VoicePage() {
                               <div>
                                 <p className="text-white font-medium">{recording.name}</p>
                                 <p className="text-sm text-slate-400">
-                                  {formatTime(recording.duration)} • {new Date(recording.timestamp).toLocaleString()}
+                                  {formatTime(recording.duration)} &middot;{' '}
+                                  {new Date(recording.timestamp).toLocaleString()}
                                 </p>
                               </div>
                             </div>
@@ -424,7 +610,7 @@ export function VoicePage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={(e) => {
+                                onClick={e => {
                                   e.stopPropagation();
                                   deleteRecording(recording.id);
                                 }}
@@ -444,6 +630,109 @@ export function VoicePage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Session Transcript Panel */}
+              <Card className="bg-slate-900/50 border-slate-800">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-white flex items-center gap-2">
+                        <MessageSquare className="w-5 h-5 text-cyan-400" />
+                        Session Transcript
+                      </CardTitle>
+                      <CardDescription>
+                        View messages from a gateway session as transcribed text
+                      </CardDescription>
+                    </div>
+                    {selectedSessionKey && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => void loadSessionMessages(selectedSessionKey)}
+                        disabled={messagesLoading}
+                      >
+                        <RefreshCw className={`w-4 h-4 text-slate-400 ${messagesLoading ? 'animate-spin' : ''}`} />
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Session selector */}
+                  {sessionsLoading ? (
+                    <Skeleton className="h-10 w-full" />
+                  ) : sessions.length === 0 ? (
+                    <div className="text-center py-4 text-slate-500 text-sm">
+                      No sessions available. Start a chat session first.
+                    </div>
+                  ) : (
+                    <Select value={selectedSessionKey} onValueChange={setSelectedSessionKey}>
+                      <SelectTrigger className="bg-slate-800 border-slate-700">
+                        <SelectValue placeholder="Select a session..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sessions.map(s => (
+                          <SelectItem key={s.key} value={s.key}>
+                            {s.agentEmoji} {s.agentName} &mdash; {s.key.slice(0, 12)}... ({s.messageCount} msgs)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
+                  {/* Messages */}
+                  {messagesLoading ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <Skeleton key={i} className="h-16 w-full" />
+                      ))}
+                    </div>
+                  ) : selectedSessionKey && sessionMessages.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">
+                      <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                      <p>No messages in this session</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {sessionMessages.map(msg => (
+                        <div
+                          key={msg.id}
+                          className={`p-3 rounded-lg border ${
+                            msg.role === 'user'
+                              ? 'bg-cyan-500/5 border-cyan-500/20'
+                              : msg.role === 'assistant'
+                                ? 'bg-purple-500/5 border-purple-500/20'
+                                : 'bg-slate-800/30 border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge
+                              variant="secondary"
+                              className={
+                                msg.role === 'user'
+                                  ? 'bg-cyan-500/20 text-cyan-300'
+                                  : msg.role === 'assistant'
+                                    ? 'bg-purple-500/20 text-purple-300'
+                                    : ''
+                              }
+                            >
+                              {msg.role}
+                            </Badge>
+                            <span className="text-xs text-slate-500">
+                              {new Date(msg.timestamp).toLocaleString()}
+                            </span>
+                            {msg.tokens && (
+                              <span className="text-xs text-slate-600 ml-auto">
+                                {msg.tokens.input + msg.tokens.output} tokens
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-300 whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
             {/* Configuration Panel */}
@@ -457,9 +746,9 @@ export function VoicePage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Model</Label>
-                  <Select 
-                    value={whisperConfig.model} 
-                    onValueChange={(v) => setWhisperConfig(prev => ({ ...prev, model: v }))}
+                  <Select
+                    value={whisperConfig.model}
+                    onValueChange={v => setWhisperConfig(prev => ({ ...prev, model: v }))}
                   >
                     <SelectTrigger className="bg-slate-800 border-slate-700">
                       <SelectValue />
@@ -473,9 +762,9 @@ export function VoicePage() {
 
                 <div className="space-y-2">
                   <Label>Language</Label>
-                  <Select 
-                    value={whisperConfig.language} 
-                    onValueChange={(v) => setWhisperConfig(prev => ({ ...prev, language: v }))}
+                  <Select
+                    value={whisperConfig.language}
+                    onValueChange={v => setWhisperConfig(prev => ({ ...prev, language: v }))}
                   >
                     <SelectTrigger className="bg-slate-800 border-slate-700">
                       <SelectValue />
@@ -506,7 +795,7 @@ export function VoicePage() {
                   <Label>Prompt (Optional)</Label>
                   <Input
                     value={whisperConfig.prompt}
-                    onChange={(e) => setWhisperConfig(prev => ({ ...prev, prompt: e.target.value }))}
+                    onChange={e => setWhisperConfig(prev => ({ ...prev, prompt: e.target.value }))}
                     placeholder="Context for transcription..."
                     className="bg-slate-800 border-slate-700"
                   />
@@ -518,12 +807,28 @@ export function VoicePage() {
                     <span>Powered by OpenAI Whisper</span>
                   </div>
                 </div>
+
+                {/* Session info */}
+                {selectedSession && (
+                  <div className="pt-4 border-t border-slate-800 space-y-1">
+                    <p className="text-xs text-slate-500 uppercase tracking-wider">Selected Session</p>
+                    <p className="text-sm text-white">
+                      {selectedSession.agentEmoji} {selectedSession.agentName}
+                    </p>
+                    <p className="text-xs text-slate-400">{selectedSession.messageCount} messages</p>
+                    <p className="text-xs text-slate-500">
+                      Last activity: {new Date(selectedSession.lastActivity).toLocaleString()}
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        {/* TTS Tab */}
+        {/* ================================================================ */}
+        {/* TTS Tab                                                          */}
+        {/* ================================================================ */}
         <TabsContent value="tts" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="bg-slate-900/50 border-slate-800">
@@ -539,7 +844,7 @@ export function VoicePage() {
                   <Label>Text to Speak</Label>
                   <textarea
                     value={ttsText}
-                    onChange={(e) => setTtsText(e.target.value)}
+                    onChange={e => setTtsText(e.target.value)}
                     rows={6}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                     placeholder="Enter text to convert to speech..."
@@ -553,7 +858,7 @@ export function VoicePage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockTTSVoices.map((voice) => (
+                      {TTS_VOICES.map(voice => (
                         <SelectItem key={voice.id} value={voice.id}>
                           {voice.name} ({voice.gender})
                         </SelectItem>
@@ -594,12 +899,43 @@ export function VoicePage() {
                     {isPlaying ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
                     {isPlaying ? 'Playing...' : 'Play'}
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={stopTTS}
-                    disabled={!isPlaying}
-                  >
+                  <Button variant="outline" onClick={stopTTS} disabled={!isPlaying}>
                     <Square className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* Send to Agent section */}
+                <div className="pt-4 border-t border-slate-800 space-y-3">
+                  <Label className="text-cyan-400 text-xs uppercase tracking-wider">Send to Agent</Label>
+                  {sessionsLoading ? (
+                    <Skeleton className="h-10 w-full" />
+                  ) : sessions.length === 0 ? (
+                    <p className="text-sm text-slate-500">No sessions available</p>
+                  ) : (
+                    <Select value={ttsSessionKey} onValueChange={setTtsSessionKey}>
+                      <SelectTrigger className="bg-slate-800 border-slate-700">
+                        <SelectValue placeholder="Select session..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sessions.map(s => (
+                          <SelectItem key={s.key} value={s.key}>
+                            {s.agentEmoji} {s.agentName} &mdash; {s.key.slice(0, 12)}...
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Button
+                    onClick={() => void sendTtsToAgent()}
+                    disabled={ttsSending || !ttsSessionKey || !ttsText.trim()}
+                    className="w-full bg-gradient-to-r from-purple-500 to-cyan-500"
+                  >
+                    {ttsSending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mr-2" />
+                    )}
+                    {ttsSending ? 'Sending...' : 'Send Text to Agent'}
                   </Button>
                 </div>
               </CardContent>
@@ -617,11 +953,8 @@ export function VoicePage() {
                       <p>No TTS history yet</p>
                     </div>
                   ) : (
-                    ttsHistory.map((item) => (
-                      <div
-                        key={item.id}
-                        className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"
-                      >
+                    ttsHistory.map(item => (
+                      <div key={item.id} className="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
                         <p className="text-sm text-slate-300 line-clamp-2">{item.text}</p>
                         <div className="flex items-center justify-between mt-2">
                           <span className="text-xs text-slate-500">{item.voice}</span>
@@ -638,7 +971,9 @@ export function VoicePage() {
           </div>
         </TabsContent>
 
-        {/* ElevenLabs Tab */}
+        {/* ================================================================ */}
+        {/* ElevenLabs Tab                                                   */}
+        {/* ================================================================ */}
         <TabsContent value="elevenlabs" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
@@ -652,10 +987,7 @@ export function VoicePage() {
                       </CardTitle>
                       <CardDescription>Premium AI voices with emotion control</CardDescription>
                     </div>
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowElevenConfig(true)}
-                    >
+                    <Button variant="outline" onClick={() => setShowElevenConfig(true)}>
                       <Settings className="w-4 h-4 mr-2" />
                       {isElevenLabsConfigured ? 'Configured' : 'Configure'}
                     </Button>
@@ -667,7 +999,9 @@ export function VoicePage() {
                       <AlertCircle className="w-5 h-5 text-amber-400" />
                       <div>
                         <p className="text-amber-400 font-medium">API Key Required</p>
-                        <p className="text-sm text-amber-400/70">Configure your ElevenLabs API key to use premium voices</p>
+                        <p className="text-sm text-amber-400/70">
+                          Configure your ElevenLabs API key to use premium voices
+                        </p>
                       </div>
                     </div>
                   )}
@@ -679,7 +1013,7 @@ export function VoicePage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockElevenLabsVoices.map((voice) => (
+                        {ELEVENLABS_VOICES.map(voice => (
                           <SelectItem key={voice.voice_id} value={voice.voice_id}>
                             {voice.name} - {voice.description}
                           </SelectItem>
@@ -692,7 +1026,7 @@ export function VoicePage() {
                     <Label>Text to Synthesize</Label>
                     <textarea
                       value={ttsText}
-                      onChange={(e) => setTtsText(e.target.value)}
+                      onChange={e => setTtsText(e.target.value)}
                       rows={4}
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                       placeholder="Enter text for ElevenLabs synthesis..."
@@ -739,7 +1073,7 @@ export function VoicePage() {
                   </div>
 
                   <Button
-                    onClick={playElevenLabsTTS}
+                    onClick={() => void playElevenLabsTTS()}
                     className="w-full bg-gradient-to-r from-purple-500 to-pink-600"
                   >
                     <Wand2 className="w-4 h-4 mr-2" />
@@ -804,13 +1138,18 @@ export function VoicePage() {
               <Input
                 type="password"
                 value={elevenLabsKey}
-                onChange={(e) => setElevenLabsKey(e.target.value)}
+                onChange={e => setElevenLabsKey(e.target.value)}
                 placeholder="sk_..."
                 className="bg-slate-800 border-slate-700"
               />
               <p className="text-xs text-slate-500">
                 Get your API key from{' '}
-                <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+                <a
+                  href="https://elevenlabs.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-cyan-400 hover:underline"
+                >
                   elevenlabs.io
                 </a>
               </p>

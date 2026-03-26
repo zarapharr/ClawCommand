@@ -86,7 +86,25 @@ export function FactoryFloorPage({ onOpenAgentCommand }: FactoryFloorPageProps) 
       setError(null);
     } catch (err) {
       if (requestId !== requestRef.current) return;
-      setError(err instanceof Error ? err.message : 'Runtime load failed');
+      const errMsg = err instanceof Error ? err.message : 'Runtime load failed';
+      setError(errMsg);
+      // In demo mode (no gateway), show placeholder agents so the UI isn't empty
+      if (agents.length === 0) {
+        const demoAgents: Agent[] = [
+          { id: 'main', name: 'Zara', emoji: '⚡', role: 'Chief of Staff', status: 'online', model: 'claude-opus-4-6', position: { x: 50, y: 30 }, sessionCount: 12, tokenUsage: 48200 },
+          { id: 'ops-builder', name: 'Builder', emoji: '🔨', role: 'Build Automation', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 25, y: 60 }, sessionCount: 5, tokenUsage: 22100 },
+          { id: 'ops-critic', name: 'Critic', emoji: '🔬', role: 'Code Review', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 75, y: 60 }, sessionCount: 3, tokenUsage: 15800 },
+          { id: 'ops-research', name: 'Research', emoji: '📊', role: 'Research & Analysis', status: 'working', model: 'gpt-5.4', position: { x: 35, y: 80 }, sessionCount: 8, tokenUsage: 31500 },
+          { id: 'ops-release', name: 'Release', emoji: '🚀', role: 'Deployment', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 65, y: 80 }, sessionCount: 2, tokenUsage: 8900 },
+        ];
+        setAgents(applySavedLayout(demoAgents));
+        setSessions([
+          { agentId: 'main', key: 'demo-session-1', messageCount: 47 },
+          { agentId: 'ops-research', key: 'demo-session-2', messageCount: 12 },
+        ]);
+        setRuntimeHealth('offline');
+        setSelectedAgent(demoAgents[0]);
+      }
     } finally {
       if (requestId === requestRef.current) {
         setLoading(false);
@@ -348,8 +366,13 @@ export function FactoryFloorPage({ onOpenAgentCommand }: FactoryFloorPageProps) 
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30"><Zap className="w-4 h-4 inline mr-2 text-emerald-400" />Working: {metrics.workingAgents}</div>
         <div className="p-3 rounded-lg border border-slate-800 bg-slate-900/30">Tokens: {(metrics.totalTokens / 1000).toFixed(1)}K</div>
       </div>
-      {contractReport.status === 'warn' && <p className="px-6 pb-2 text-xs text-amber-300">Contract check: {contractReport.issues[0]}</p>}
-      {error && <p className="px-6 text-sm text-red-400">{error}</p>}
+      {error && !error.includes('Gateway') && <p className="px-6 text-sm text-red-400">{error}</p>}
+      {(error?.includes('Gateway') || (agents.length === 0 && !loading)) && (
+        <div className="mx-6 mb-2 p-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 text-xs text-cyan-300 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          Demo mode — connect a local OpenClaw gateway for live data
+        </div>
+      )}
 
       <div className="px-6 py-3 border-b border-slate-800/40 flex gap-2">
         <Button variant="outline" className={activeView === 'floor' ? 'border-cyan-500/50 text-cyan-300' : 'border-slate-700 text-slate-300'} onClick={() => setActiveView('floor')}>

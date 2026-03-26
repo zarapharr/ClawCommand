@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useBudgetStore } from '@/stores/enterprise-store';
-import { mockAgents } from '@/data/mock-data';
+import type { Agent } from '@/types';
+import { fetchAgents } from '@/lib/openclaw-api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,7 +56,16 @@ export function BudgetPage() {
     updateBudget,
   } = useBudgetStore();
 
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgents().then(result => {
+      if (!cancelled && result.ok) setAgents(result.data);
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingBudget, setEditingBudget] = useState<any>(null);
   // Alert configuration for future use
@@ -68,17 +78,17 @@ export function BudgetPage() {
   });
 
   // Get agent name
-  const getAgentName = (agentId: string) => {
-    return mockAgents.find(a => a.id === agentId)?.name || agentId;
-  };
+  const getAgentName = useCallback((agentId: string) => {
+    return agents.find(a => a.id === agentId)?.name || agentId;
+  }, [agents]);
 
-  const getAgentEmoji = (agentId: string) => {
-    return mockAgents.find(a => a.id === agentId)?.emoji || '👤';
-  };
+  const getAgentEmoji = useCallback((agentId: string) => {
+    return agents.find(a => a.id === agentId)?.emoji || '👤';
+  }, [agents]);
 
   // Calculate team totals
   const teamBudget = getTotalTeamBudget;
-  const teamUtilization = (teamBudget.spent / teamBudget.total) * 100;
+  const teamUtilization = teamBudget.total > 0 ? (teamBudget.spent / teamBudget.total) * 100 : 0;
 
   // Budget data for charts
   const budgetData = useMemo(() => {
@@ -373,7 +383,7 @@ export function BudgetPage() {
               <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {budgets.map((budget) => {
                   const utilization = (budget.spentThisMonth / budget.monthlyBudget) * 100;
-                  const agent = mockAgents.find(a => a.id === budget.agentId);
+                  const agent = agents.find(a => a.id === budget.agentId);
 
                   return (
                     <div

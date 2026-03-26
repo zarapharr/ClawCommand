@@ -3,7 +3,8 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { FeatureUnavailable } from '@/components/runtime/FeatureUnavailable';
 import type { ViewType, SystemMetrics } from '@/types';
-import { mockSystemMetrics, mockAgents } from '@/data/mock-data';
+import { fetchAgents } from '@/lib/openclaw-api';
+import type { Agent } from '@/types';
 import { cn } from '@/lib/utils';
 import { getRuntimeFeatureFlags } from '@/lib/feature-flags';
 
@@ -69,8 +70,22 @@ function App() {
   const [currentView, setCurrentView] = useState<ViewType>(initialRoute.view);
   const [routedAgentId, setRoutedAgentId] = useState<string | null>(initialRoute.agentId);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [metrics, setMetrics] = useState<SystemMetrics>(mockSystemMetrics);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [metrics, setMetrics] = useState<SystemMetrics>({
+    cpu: { usage: 0 },
+    memory: { used: 0, total: 0, free: 0 },
+    disk: { used: 0, total: 0, free: 0 },
+    gateway: { status: 'offline', uptime: 0, connectedChannels: [] },
+  });
   const featureAvailability = getRuntimeFeatureFlags();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgents().then(result => {
+      if (!cancelled && result.ok) setAgents(result.data);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const updateRoute = useCallback((view: ViewType, agentId?: string | null) => {
     if (typeof window === 'undefined') return;
@@ -183,7 +198,7 @@ function App() {
     }
   };
 
-  const onlineAgents = mockAgents.filter(a => a.status !== 'offline').length;
+  const onlineAgents = agents.filter(a => a.status !== 'offline').length;
 
   return (
     <div className="h-screen bg-slate-950 text-white overflow-hidden">
@@ -210,7 +225,7 @@ function App() {
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           isSidebarOpen={isSidebarOpen}
           metrics={metrics}
-          agentCount={{ online: onlineAgents, total: mockAgents.length }}
+          agentCount={{ online: onlineAgents, total: agents.length }}
         />
 
         <main className="flex-1 overflow-hidden relative">

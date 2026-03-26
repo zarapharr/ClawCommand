@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { Skill } from '@/types';
-import { mockSkills } from '@/data/mock-data';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +13,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 
 export function SkillsPage() {
-  const [skills, setSkills] = useState<Skill[]>(mockSkills);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isEditing, setIsEditing] = useState(false);

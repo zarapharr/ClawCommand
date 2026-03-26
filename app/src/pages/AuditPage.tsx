@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AuditLog } from '@/components/audit/AuditLog';
-import { mockAuditLogs } from '@/data/enterprise-mock';
+import type { AuditLog as AuditLogType } from '@/types/enterprise';
 import {
   FileText, Shield, Clock, CheckCircle, AlertTriangle, Download,
   BarChart3, TrendingUp
@@ -15,9 +16,11 @@ import {
 export function AuditPage() {
   const [exportFormat] = useState<'csv' | 'json'>('csv');
 
-  // Transform mock audit logs to AuditEvent format
+  const [auditLogs] = useState<AuditLogType[]>([]);
+
+  // Transform audit logs to AuditEvent format
   const auditEvents = useMemo(() => {
-    return mockAuditLogs.map((log) => {
+    return auditLogs.map((log) => {
       const changeEntries = Object.entries(log.changes || {}).map(([field, change]) => ({
         field,
         old: change.old,

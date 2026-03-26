@@ -1,5 +1,4 @@
 import type { Agent, CronJob, Session } from '@/types';
-import { mockAgents, mockCronJobs, mockSessions } from '@/data/mock-data';
 import { defaultEnvironmentProfile } from '@/config/environment-profile';
 import { redactValue } from '@/lib/environment-session';
 
@@ -219,22 +218,22 @@ function getRuntimeCollection<T>(candidatePath: string, localStorageKey: string,
 }
 
 export function getAgentsFeed(): RuntimeFeed<Agent[]> {
-  return getRuntimeCollection<Agent[]>('agents', STORAGE_KEYS.agents, mockAgents);
+  return getRuntimeCollection<Agent[]>('agents', STORAGE_KEYS.agents, []);
 }
 
 export function getSessionsFeed(): RuntimeFeed<Session[]> {
-  return getRuntimeCollection<Session[]>('sessions', STORAGE_KEYS.sessions, mockSessions);
+  return getRuntimeCollection<Session[]>('sessions', STORAGE_KEYS.sessions, []);
 }
 
 export function getCronFeed(): RuntimeFeed<CronJob[]> {
-  return getRuntimeCollection<CronJob[]>('cronJobs', STORAGE_KEYS.cron, mockCronJobs);
+  return getRuntimeCollection<CronJob[]>('cronJobs', STORAGE_KEYS.cron, []);
 }
 
 export function getInteractionStats(): RuntimeFeed<{ totalMessages: number; activeSessions: number; errorsLastHour: number }> {
   return getRuntimeCollection('interactionStats', STORAGE_KEYS.interaction, {
-    totalMessages: mockSessions.reduce((acc, s) => acc + s.messageCount, 0),
-    activeSessions: mockSessions.filter((s) => s.status === 'active').length,
-    errorsLastHour: mockAgents.filter((a) => a.status === 'error').length,
+    totalMessages: 0,
+    activeSessions: 0,
+    errorsLastHour: 0,
   });
 }
 

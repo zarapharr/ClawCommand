@@ -8,21 +8,15 @@ import type {
   CostAnalytics, PerformanceAnalytics, CollaborationMetrics,
   ModelTier, AuditLog, WorkflowNode, WorkflowEdge
 } from '@/types/enterprise';
-import {
-  mockAgentBudgets, mockSessionCosts, mockBudgetAlerts, mockModelRoutings,
-  mockRoutingRules, mockAgentVersions, mockAgentGroups, mockWorkflows,
-  mockCostAnalytics, mockPerformanceAnalytics, mockCollaborationMetrics,
-  modelTiers, mockAuditLogs
-} from '@/data/enterprise-mock';
 
 // ============================================
 // BUDGET STORE
 // ============================================
 
 export function useBudgetStore() {
-  const [budgets, setBudgets] = useState<AgentBudget[]>(mockAgentBudgets);
-  const [sessionCosts, setSessionCosts] = useState<SessionCost[]>(mockSessionCosts);
-  const [alerts, setAlerts] = useState<BudgetAlert[]>(mockBudgetAlerts);
+  const [budgets, setBudgets] = useState<AgentBudget[]>([]);
+  const [sessionCosts, setSessionCosts] = useState<SessionCost[]>([]);
+  const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
 
   // Get budget for an agent
   const getAgentBudget = useCallback((agentId: string) => {
@@ -115,9 +109,9 @@ export function useBudgetStore() {
 // ============================================
 
 export function useRoutingStore() {
-  const [routings, setRoutings] = useState<ModelRouting[]>(mockModelRoutings);
-  const [rules, setRules] = useState<RoutingRule[]>(mockRoutingRules);
-  const [availableModels] = useState<ModelTier[]>(modelTiers);
+  const [routings, setRoutings] = useState<ModelRouting[]>([]);
+  const [rules, setRules] = useState<RoutingRule[]>([]);
+  const [availableModels] = useState<ModelTier[]>([]);
 
   // Get routing for an agent
   const getAgentRouting = useCallback((agentId: string) => {
@@ -187,7 +181,7 @@ export function useRoutingStore() {
 // ============================================
 
 export function useVersionStore() {
-  const [versions, setVersions] = useState<AgentVersion[]>(mockAgentVersions);
+  const [versions, setVersions] = useState<AgentVersion[]>([]);
 
   // Get versions for an agent
   const getAgentVersions = useCallback((agentId: string) => {
@@ -250,7 +244,7 @@ export function useVersionStore() {
 // ============================================
 
 export function useGroupsStore() {
-  const [groups, setGroups] = useState<AgentGroup[]>(mockAgentGroups);
+  const [groups, setGroups] = useState<AgentGroup[]>([]);
 
   // Get agents in a group
   const getGroupAgents = useCallback((groupId: string) => {
@@ -306,7 +300,7 @@ export function useGroupsStore() {
 // ============================================
 
 export function useWorkflowStore() {
-  const [workflows, setWorkflows] = useState<Workflow[]>(mockWorkflows);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [executions, setExecutions] = useState<WorkflowExecution[]>([]);
 
   // Get workflow by ID
@@ -418,9 +412,27 @@ export function useWorkflowStore() {
 // ============================================
 
 export function useAnalyticsStore() {
-  const [costAnalytics] = useState<CostAnalytics>(mockCostAnalytics);
-  const [performanceAnalytics] = useState<PerformanceAnalytics>(mockPerformanceAnalytics);
-  const [collaborationMetrics] = useState<CollaborationMetrics>(mockCollaborationMetrics);
+  const [costAnalytics] = useState<CostAnalytics>({
+    agentCosts: [],
+    modelDistribution: [],
+    tokenEfficiency: { averageInputTokens: 0, averageOutputTokens: 0, inputOutputRatio: 0, costPerRequest: 0, optimizationScore: 0 },
+    burnRate: { currentMonthlySpend: 0, projectedMonthlySpend: 0, daysUntilBudgetExhausted: 0, recommendedActions: [] },
+  });
+  const [performanceAnalytics] = useState<PerformanceAnalytics>({
+    responseTimeHeatmap: [],
+    successRate: { overall: 0, byAgent: {}, byTaskType: {}, trend: 'stable' },
+    toolUsage: [],
+    sessionDuration: { averageSeconds: 0, medianSeconds: 0, byAgent: {} },
+  });
+  const [collaborationMetrics] = useState<CollaborationMetrics>({
+    interAgentMessages: [],
+    handoffSuccessRate: 0,
+    totalHandoffs: 0,
+    successfulHandoffs: 0,
+    conflictsResolved: 0,
+    conflictsEscalated: 0,
+    averageResolutionTime: 0,
+  });
 
   // Get cost breakdown for an agent
   const getAgentCostBreakdown = useCallback((agentId: string) => {
@@ -465,7 +477,7 @@ export function useAnalyticsStore() {
 // ============================================
 
 export function useAuditStore() {
-  const [logs, setLogs] = useState<AuditLog[]>(mockAuditLogs);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
 
   // Get logs for a resource
   const getResourceLogs = useCallback((resourceType: AuditLog['resourceType'], resourceId: string) => {

@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import type { ViewType, Agent, Skill, Task, Session, CronJob, ActivityEvent, SystemMetrics } from '@/types';
-import { mockAgents, mockSkills, mockTasks, mockSessions, mockCronJobs, mockActivityFeed, mockSystemMetrics, mockConnections } from '@/data/mock-data';
 
 // Navigation Store
 export function useNavigationStore() {
@@ -20,9 +19,9 @@ export function useNavigationStore() {
 
 // Agents Store
 export function useAgentsStore() {
-  const [agents, setAgents] = useState<Agent[]>(mockAgents);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [connections] = useState(mockConnections);
+  const [connections] = useState<{ from: string; to: string }[]>([]);
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId) || null;
 
@@ -66,7 +65,7 @@ export function useAgentsStore() {
 
 // Skills Store
 export function useSkillsStore() {
-  const [skills, setSkills] = useState<Skill[]>(mockSkills);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
 
   const selectedSkill = skills.find(s => s.id === selectedSkillId) || null;
@@ -116,7 +115,7 @@ export function useSkillsStore() {
 
 // Tasks Store
 export function useTasksStore() {
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId) || null;
@@ -196,7 +195,7 @@ export function useTasksStore() {
 
 // Sessions Store
 export function useSessionsStore() {
-  const [sessions, setSessions] = useState<Session[]>(mockSessions);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId) || null;
@@ -254,7 +253,7 @@ export function useSessionsStore() {
 
 // Cron Store
 export function useCronStore() {
-  const [jobs, setJobs] = useState<CronJob[]>(mockCronJobs);
+  const [jobs, setJobs] = useState<CronJob[]>([]);
 
   const createJob = useCallback((job: Omit<CronJob, 'id' | 'runCount' | 'errorCount' | 'createdAt'>) => {
     const newJob: CronJob = {
@@ -313,7 +312,7 @@ export function useCronStore() {
 
 // Activity Store
 export function useActivityStore() {
-  const [activities, setActivities] = useState<ActivityEvent[]>(mockActivityFeed);
+  const [activities, setActivities] = useState<ActivityEvent[]>([]);
 
   const addActivity = useCallback((activity: Omit<ActivityEvent, 'id' | 'timestamp'>) => {
     const newActivity: ActivityEvent = {
@@ -329,7 +328,12 @@ export function useActivityStore() {
 
 // System Store
 export function useSystemStore() {
-  const [metrics, setMetrics] = useState<SystemMetrics>(mockSystemMetrics);
+  const [metrics, setMetrics] = useState<SystemMetrics>({
+    cpu: { usage: 0 },
+    memory: { used: 0, total: 0, free: 0 },
+    disk: { used: 0, total: 0, free: 0 },
+    gateway: { status: 'offline', uptime: 0, connectedChannels: [] },
+  });
 
   const updateMetrics = useCallback((updates: Partial<SystemMetrics>) => {
     setMetrics(prev => ({ ...prev, ...updates }));

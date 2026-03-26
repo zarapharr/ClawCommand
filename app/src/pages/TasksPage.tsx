@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import type { Task } from '@/types';
-import { mockTasks, mockAgents } from '@/data/mock-data';
+import { useState, useEffect } from 'react';
+import type { Task, Agent } from '@/types';
+import { fetchAgents } from '@/lib/openclaw-api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,8 +30,17 @@ const priorityColors = {
 };
 
 export function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgents().then(result => {
+      if (!cancelled && result.ok) setAgents(result.data);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleMoveTask = (taskId: string, newStatus: Task['status']) => {
     setTasks(prev => prev.map(t => 
@@ -51,11 +60,11 @@ export function TasksPage() {
   };
 
   const getAgentEmoji = (agentId: string) => {
-    return mockAgents.find(a => a.id === agentId)?.emoji || '👤';
+    return agents.find(a => a.id === agentId)?.emoji || '👤';
   };
 
   const getAgentName = (agentId: string) => {
-    return mockAgents.find(a => a.id === agentId)?.name || 'Unknown';
+    return agents.find(a => a.id === agentId)?.name || 'Unknown';
   };
 
   return (

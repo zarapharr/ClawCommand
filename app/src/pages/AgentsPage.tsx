@@ -127,6 +127,16 @@ export function AgentsPage({ initialSelectedAgentId = null }: AgentsPageProps) {
     });
 
     const stopPolling = startRuntimePolling(10_000);
+    // Immediate fetch on mount so real agents appear without waiting for interval
+    void (async () => {
+      const [ar, sr] = await Promise.all([fetchAgents(), fetchSessions()]);
+      if (ar.ok) setAgents(ar.data);
+      if (sr.ok) {
+        setSessionCount(sr.data.length);
+        const latest = sr.data.map((s) => s.lastActivity).sort().at(-1);
+        setLastActivity(latest ?? null);
+      }
+    })();
     const tick = window.setInterval(async () => {
       const [agentsResult, sessionsResult] = await Promise.all([fetchAgents(), fetchSessions()]);
       if (agentsResult.ok) {

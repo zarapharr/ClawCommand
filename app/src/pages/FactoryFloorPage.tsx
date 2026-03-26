@@ -90,12 +90,14 @@ export function FactoryFloorPage({ onOpenAgentCommand }: FactoryFloorPageProps) 
       setError(errMsg);
       // In demo mode (no gateway), show placeholder agents so the UI isn't empty
       if (agents.length === 0) {
+        const demoModel = (m: string) => ({ provider: m.split('-')[0], model: m, temperature: 0.7, maxTokens: 4096 });
+        const base = { description: '', tools: { allow: [] as string[], deny: [] as string[] }, skills: [] as string[], workspace: '', createdAt: '', updatedAt: '', bootstrapFiles: { agents: '', soul: '', tools: '', memory: '' }, connections: [] as string[], metrics: { messagesToday: 0, tokensUsed: 0, lastActive: '' } };
         const demoAgents: Agent[] = [
-          { id: 'main', name: 'Zara', emoji: '⚡', role: 'Chief of Staff', status: 'online', model: 'claude-opus-4-6', position: { x: 50, y: 30 }, sessionCount: 12, tokenUsage: 48200 },
-          { id: 'ops-builder', name: 'Builder', emoji: '🔨', role: 'Build Automation', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 25, y: 60 }, sessionCount: 5, tokenUsage: 22100 },
-          { id: 'ops-critic', name: 'Critic', emoji: '🔬', role: 'Code Review', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 75, y: 60 }, sessionCount: 3, tokenUsage: 15800 },
-          { id: 'ops-research', name: 'Research', emoji: '📊', role: 'Research & Analysis', status: 'working', model: 'gpt-5.4', position: { x: 35, y: 80 }, sessionCount: 8, tokenUsage: 31500 },
-          { id: 'ops-release', name: 'Release', emoji: '🚀', role: 'Deployment', status: 'idle', model: 'claude-sonnet-4-6', position: { x: 65, y: 80 }, sessionCount: 2, tokenUsage: 8900 },
+          { ...base, id: 'main', name: 'Zara', emoji: '⚡', role: 'Chief of Staff', status: 'online', model: demoModel('claude-opus-4-6'), position: { x: 50, y: 30 } },
+          { ...base, id: 'ops-builder', name: 'Builder', emoji: '🔨', role: 'Build Automation', status: 'idle', model: demoModel('claude-sonnet-4-6'), position: { x: 25, y: 60 } },
+          { ...base, id: 'ops-critic', name: 'Critic', emoji: '🔬', role: 'Code Review', status: 'idle', model: demoModel('claude-sonnet-4-6'), position: { x: 75, y: 60 } },
+          { ...base, id: 'ops-research', name: 'Research', emoji: '📊', role: 'Research & Analysis', status: 'working', model: demoModel('gpt-5.4'), position: { x: 35, y: 80 } },
+          { ...base, id: 'ops-release', name: 'Release', emoji: '🚀', role: 'Deployment', status: 'idle', model: demoModel('claude-sonnet-4-6'), position: { x: 65, y: 80 } },
         ];
         setAgents(applySavedLayout(demoAgents));
         setSessions([
@@ -302,10 +304,12 @@ export function FactoryFloorPage({ onOpenAgentCommand }: FactoryFloorPageProps) 
     ];
   }, [agents, metrics.onlineAgents, metrics.workingAgents, runtimeHealth, sessions.length, subagentActivities.length, teamStructure.lead, teamStructure.workers]);
 
+  // Contract report computed on mount; consumed by future diagnostics panel
   const contractReport = useMemo(() => {
     if (typeof window === 'undefined') return evaluateRuntimeContract(null);
     return evaluateRuntimeContract(parseRuntimeContractSnapshot(window.localStorage.getItem('clawcommand.runtime.contract')));
-  }, []); // Empty deps: contract evaluation is stable
+  }, []);
+  void contractReport;
 
   const applyNodePreset = (preset: 'small' | 'medium' | 'large') => {
     setNodeSizePreset(preset);
